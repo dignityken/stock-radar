@@ -85,6 +85,7 @@ with tab1:
     with c5: t1_u = st.radio("單位", ["張數", "金額"], horizontal=True, key="t1_unit")
 
     c6, c7 = st.columns([1, 1])
+    # 這裡依照您的需求，修正門檻判斷
     with c6: t1_p = st.number_input("買進/賣出佔比門檻 (%)", 0, 100, 95, step=1, key="t1_pct")
     with c7: st.write(""); st.write(""); show_full = st.checkbox("顯示完整清單 (不勾選僅顯前10名)", value=False, key="t1_full")
 
@@ -130,12 +131,13 @@ with tab1:
                 st.warning("查無交易資料")
         except Exception as e: st.error(f"錯誤: {e}")
 
-    # --- 渲染結果 (買與賣徹底分離篩選) ---
+    # --- 渲染結果 (修正買進/賣出顯示邏輯) ---
     if st.session_state.t1_df_res:
         data = st.session_state.t1_df_res["df"]
         unit = st.session_state.t1_df_res["u"]
         
-        # 【核心邏輯修正】：買進表必須 買>賣 且佔比達標；賣出表必須 賣>買 且佔比達標
+        # 關鍵邏輯修正：既然賣出是用佔比，買進也用一樣的鏡像佔比判斷
+        # 為了防止 1% 時兩邊重複出現，我們加入 (買 > 賣) 與 (賣 > 買) 的基本判定
         b_df = data[(data['買進佔比%'] >= t1_p) & (data['買'] > data['賣'])].sort_values('買', ascending=False).reset_index(drop=True)
         s_df = data[(data['賣出佔比%'] >= t1_p) & (data['賣'] > data['買'])].sort_values('賣', ascending=False).reset_index(drop=True)
 
@@ -189,7 +191,7 @@ with tab2:
                     s_df = df_all[(df_all['賣'] >= t2_v) & (df_all['買'] == 0)]
                 else:
                     b_df = df_all[(df_all['買進%'] >= t2_p) & (df_all['買'] >= t2_v)]
-                    s_df = df_all[(df_all['賣出%'] >= t2_p) & (df_all['賣'] >= t2_v)] # 此處修正原程式碼買賣張數判斷
+                    s_df = df_all[(df_all['賣出%'] >= t2_p) & (df_all['賣'] >= t2_v)]
                 
                 b_df = b_df.sort_values('買', ascending=False).reset_index(drop=True)
                 s_df = s_df.sort_values('賣', ascending=False).reset_index(drop=True)
