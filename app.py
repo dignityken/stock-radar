@@ -87,7 +87,7 @@ with tab1:
     c6, c7, c8 = st.columns([1.5, 1, 1])
     with c6: t1_mode = st.radio("篩選條件", ["嚴格模式 (只買不賣)", "濾網模式 (自訂佔比)"], index=1, horizontal=True, key="t1_mode")
     with c7: t1_p = st.number_input("佔比 >= (%)", 0.0, 100.0, 95.0, step=1.0, key="t1_pct")
-    with c8: st.write(""); show_full = st.checkbox("顯示完整清單", value=True, key="t1_full")
+    with c8: st.write(""); show_full = st.checkbox("顯示完整清單", value=False, key="t1_full")
 
     if st.button("開始分點尋寶 🚀", key="t1_go"):
         sd_s, ed_s = t1_sd.strftime('%Y-%m-%d'), t1_ed.strftime('%Y-%m-%d')
