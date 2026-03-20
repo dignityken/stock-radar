@@ -588,8 +588,8 @@ with tab3:
 
 # --- Tab 4 (專業主力 K 線圖) ---
 with tab4:
-    st.markdown("### 📊 專業主力 K 線與分點進出圖")
-    st.caption("將醜陋的網頁轉化為專業 TradingView 質感的分析圖表。支援歷史回溯、多週期切換與主力追蹤清單。")
+    st.markdown("### 📊 K 線與分點進出圖")
+    st.caption("支援歷史回溯、多週期切換與主力追蹤清單。")
     
     col1, col2, col3, col4, col5 = st.columns([1, 1.5, 1, 1, 1])
     with col1:
@@ -603,7 +603,7 @@ with tab4:
         t4_period = st.radio("K線週期", ["日", "週", "月"], horizontal=True, key="t4_period")
     with col4:
         st.write("") 
-        draw_btn = st.button("🎨 繪製專業圖表", use_container_width=True)
+        draw_btn = st.button("🎨 繪製圖表", use_container_width=True)
     with col5:
         st.write("")
         fav_btn = st.button("❤️ 加入追蹤清單", use_container_width=True)
@@ -680,7 +680,7 @@ with tab4:
         br_name_to_draw = st.session_state.locked_br_name
         br_id_to_draw = st.session_state.locked_br_id
         
-        with st.spinner(f"正在調取 {sid_to_draw} 歷史資料並繪製專業圖表，請稍候..."):
+        with st.spinner(f"正在調取 {sid_to_draw} 歷史資料並繪製圖表，請稍候..."):
             try:
                 df_k = get_stock_kline(sid_to_draw)
                 if df_k.empty:
