@@ -107,12 +107,12 @@ UI_TREE, BROKER_MAP = build_full_broker_db_structure(FINAL_RAW_DATA_CLEANED, HQ_
 def get_stock_id(name_str):
     """
     從股票名稱字串中提取股票代號。
-    修正：直接抓取開頭連續的「英文字母與數字」組合，解決 00984B 遺漏 B 的問題。
+    終極修正：抓取開頭連續的「英文字母與數字」，完美解決 00984B 遺漏 B 的問題！
     """
     s = str(name_str).strip()
-    match = re.match(r'^([a-zA-Z0-9]{4,})', s)
+    match = re.match(r'^([A-Za-z0-9]+)', s)
     if match:
-        return match.group(1)
+        return match.group(1).upper()
     return None
 
 # ==========================================
@@ -267,7 +267,7 @@ with tab2:
     with c7: st.write(""); show_full_t2 = st.checkbox("顯示完整清單", value=False, key="t2_full")
 
     if st.button("開始籌碼追蹤 🚀", key="t2_btn"):
-        t2_sid_clean = t2_sid.strip().replace(" ", "")
+        t2_sid_clean = t2_sid.strip().replace(" ", "").upper()
         if not t2_sid_clean.isalnum(): 
             st.error("股票代號必須是字母數字組合。")
         else:
