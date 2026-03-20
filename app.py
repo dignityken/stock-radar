@@ -170,11 +170,26 @@ UI_TREE, BROKER_MAP = build_full_broker_db_structure(FINAL_RAW_DATA_CLEANED)
 
 
 def get_stock_id(name_str):
-    # 修正：確保股票代號是純數字，且至少4位
-    res = re.search(r'\b(\d{4,})\b', str(name_str))
-    return res.group(1) if res else None
+    """
+    從股票名稱字串中提取股票代號。
+    支援純數字代號 (至少4位) 和字母數字混合代號 (如 ETF)。
+    """
+    s = str(name_str).strip()
 
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+    # 1. 嘗試匹配開頭為數字且長度為4位或以上的代號
+    match_num = re.match(r'^(\d{4,})', s)
+    if match_num:
+        return match_num.group(1)
+
+    # 2. 嘗試匹配開頭為數字或字母，且後面跟著數字或字母的組合 (適用於 ETF, 如 00981A, 0050)
+    # 這個模式會捕捉字串開頭的連續字母數字組合
+    match_alpha_num = re.match(r'^([a-zA-Z0-9]+)', s)
+    if match_alpha_num:
+        return match_alpha_num.group(1)
+        
+    return None
+
+# HEADERS = {"User-Agent": "Mozilla/5.0"} # 保持這行不動，只是作為參考點
 
 # ==========================================
 # 1. UI 介面設定
@@ -275,10 +290,32 @@ with tab1:
                     only_buy = df_all[df_all['買%'] >= t1_p].copy()
                     only_sell = df_all[df_all['賣%'] >= t1_p].copy()
 
-                # --- 核心連結生成 (修正股票代號) ---
-                for d in [only_buy, only_sell]:
-                    if not d.empty:
-                        d['點我看圖'] = d['股票名稱'].apply(lambda x: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zcw/zcw1_{get_stock_id(x)}.djhtm" if get_stock_id(x) else "")
+                # --- 核心連結生成 (修正股票代號處理與連結顯示) ---
+            # 處理大戶吃貨中的股票連結
+            if not only_buy.empty:
+                # 先提取股票代號到一個臨時列
+                only_buy['extracted_stock_id'] = only_buy['股票名稱'].apply(get_stock_id)
+                # 根據提取的代號生成連結
+                only_buy['點我看圖'] = only_buy.apply(
+                    lambda row: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zcw/zcw1_{row['extracted_stock_id']}.djhtm" 
+                                if row['extracted_stock_id'] else "", 
+                    axis=1
+                )
+                # 移除臨時列
+                only_buy.drop(columns=['extracted_stock_id'], inplace=True)
+
+            # 處理大戶倒貨中的股票連結
+            if not only_sell.empty:
+                # 先提取股票代號到一個臨時列
+                only_sell['extracted_stock_id'] = only_sell['股票名稱'].apply(get_stock_id)
+                # 根據提取的代號生成連結
+                only_sell['點我看圖'] = only_sell.apply(
+                    lambda row: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zcw/zcw1_{row['extracted_stock_id']}.djhtm" 
+                                if row['extracted_stock_id'] else "", 
+                    axis=1
+                )
+                # 移除臨時列
+                only_sell.drop(columns=['extracted_stock_id'], inplace=True)
 
                 st.subheader(f"🕵️ 分點尋寶結果：{sel_hq} - {sel_br_l}")
                 st.caption(f"📌 區間：{sd_s} ~ {ed_s} | 單位：{t1_u}")
