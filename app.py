@@ -21,21 +21,15 @@ HEADERS = {"User-Agent": "Mozilla/5.0"}
 GOOGLE_DRIVE_HQ_DATA_URL = "https://drive.google.com/file/d/112sWHyGbfuNyOEN2M85wIhWtHj1MqKj5/view?usp=drivesdk"
 GOOGLE_DRIVE_BRANCH_DATA_URL = "https://drive.google.com/file/d/1C6axJwaHq3SFRslODK8m28WRYFDd90x_/view?usp=drivesdk"
 
-# --- 初始化 Session State (用於跨分頁傳遞與繪圖狀態) ---
-if 'jump_sid' not in st.session_state:
-    st.session_state.jump_sid = "6488"
-if 'jump_br_name' not in st.session_state:
-    st.session_state.jump_br_name = "兆豐-忠孝"
-if 'auto_draw' not in st.session_state:
-    st.session_state.auto_draw = False
-if 't4_drawn' not in st.session_state:
-    st.session_state.t4_drawn = False
-if 'locked_sid' not in st.session_state:
-    st.session_state.locked_sid = "6488"
-if 'locked_br_id' not in st.session_state:
-    st.session_state.locked_br_id = "0037003000300061"
-if 'locked_br_name' not in st.session_state:
-    st.session_state.locked_br_name = "兆豐-忠孝"
+# --- 初始化 Session State (用於跨分頁、繪圖與追蹤清單) ---
+if 'jump_sid' not in st.session_state: st.session_state.jump_sid = "6488"
+if 'jump_br_name' not in st.session_state: st.session_state.jump_br_name = "兆豐-忠孝"
+if 'auto_draw' not in st.session_state: st.session_state.auto_draw = False
+if 't4_drawn' not in st.session_state: st.session_state.t4_drawn = False
+if 'locked_sid' not in st.session_state: st.session_state.locked_sid = "6488"
+if 'locked_br_id' not in st.session_state: st.session_state.locked_br_id = "0037003000300061"
+if 'locked_br_name' not in st.session_state: st.session_state.locked_br_name = "兆豐-忠孝"
+if 'watchlist' not in st.session_state: st.session_state.watchlist = [] # 新增：追蹤清單
 
 # --- 函數：從 Google Drive 連結下載內容 ---
 @st.cache_data(ttl=3600) 
@@ -154,7 +148,7 @@ def calculate_macd(df, fast, slow, signal):
     hist = macd - sig
     return macd, sig, hist
 
-# --- 輔助函數：快取歷史抓取 (確保切換週期時瞬間繪圖) ---
+# --- 輔助函數：自動判斷上市/上櫃並抓取長歷史 K 線 ---
 @st.cache_data(ttl=3600)
 def get_stock_kline(stock_id):
     end_date = datetime.date.today() + datetime.timedelta(days=1)
@@ -515,9 +509,9 @@ with tab3:
 # --- Tab 4 (專業主力 K 線圖) ---
 with tab4:
     st.markdown("### 📊 專業主力 K 線與分點進出圖")
-    st.caption("將醜陋的網頁轉化為專業 TradingView 質感的分析圖表。支援歷史回溯與多週期切換。")
+    st.caption("將醜陋的網頁轉化為專業 TradingView 質感的分析圖表。支援歷史回溯、多週期切換與主力追蹤清單。")
     
-    col1, col2, col3, col4 = st.columns([1, 1.5, 1, 1])
+    col1, col2, col3, col4, col5 = st.columns([1, 1.5, 1, 1, 1])
     with col1:
         t4_sid = st.text_input("股票代號", st.session_state.jump_sid, key="t4_sid")
     with col2:
@@ -526,11 +520,25 @@ with tab4:
         default_br_idx = all_br_names.index(passed_br) if passed_br in all_br_names else 0
         t4_br_name = st.selectbox("搜尋分點", all_br_names, index=default_br_idx, key="t4_br")
     with col3:
-        # 直接把週期切換放在外面，切換時即刻重繪
         t4_period = st.radio("K線週期", ["日", "週", "月"], horizontal=True, key="t4_period")
     with col4:
         st.write("") 
         draw_btn = st.button("🎨 繪製專業圖表", use_container_width=True)
+    with col5:
+        st.write("")
+        # --- 新增：加入追蹤清單按鈕 ---
+        fav_btn = st.button("❤️ 加入追蹤清單", use_container_width=True)
+
+    t4_sid_clean = t4_sid.strip().upper()
+    
+    # --- 處理加入最愛邏輯 ---
+    if fav_btn:
+        entry = {"股票代號": t4_sid_clean, "追蹤分點": t4_br_name}
+        if entry not in st.session_state.watchlist:
+            st.session_state.watchlist.append(entry)
+            st.success(f"✅ 已將 {t4_sid_clean} - {t4_br_name} 加入追蹤清單！")
+        else:
+            st.warning("⚠️ 此組合已在您的追蹤清單中。")
 
     with st.expander("⚙️ 圖表與技術指標設定"):
         tc1, tc2 = st.columns([1,2])
@@ -554,15 +562,44 @@ with tab4:
             macd2_s = st.number_input("長線-慢線", value=52)
             macd2_sig = st.number_input("長線-訊號", value=18)
 
-    # 將觸發條件與快取狀態綁定，實現「切換週期不用按按鈕即刻重繪」
+    # --- 新增：顯示我的追蹤清單 ---
+    if st.session_state.watchlist:
+        with st.expander("⭐ 我的主力追蹤清單 (打勾可直接載入圖表)", expanded=False):
+            wl_df = pd.DataFrame(st.session_state.watchlist)
+            wl_df.insert(0, '載入繪圖', False)
+            wl_df['刪除此筆'] = False
+            
+            wl_config = {
+                "載入繪圖": st.column_config.CheckboxColumn("載入繪圖", help="打勾後自動更新上方圖表"),
+                "刪除此筆": st.column_config.CheckboxColumn("刪除此筆", help="打勾後將從清單移除")
+            }
+            edited_wl = st.data_editor(wl_df, hide_index=True, column_config=wl_config, use_container_width=True, key="wl_editor")
+            
+            # 處理載入
+            load_rows = edited_wl[edited_wl['載入繪圖'] == True]
+            if not load_rows.empty:
+                load_sid = load_rows.iloc[0]['股票代號']
+                load_br = load_rows.iloc[0]['追蹤分點']
+                st.session_state.jump_sid = load_sid
+                st.session_state.jump_br_name = load_br
+                st.session_state.auto_draw = True
+                st.rerun() # 強制刷新頁面載入參數
+                
+            # 處理刪除
+            del_rows = edited_wl[edited_wl['刪除此筆'] == True]
+            if not del_rows.empty:
+                del_sid = del_rows.iloc[0]['股票代號']
+                del_br = del_rows.iloc[0]['追蹤分點']
+                st.session_state.watchlist = [item for item in st.session_state.watchlist if not (item['股票代號'] == del_sid and item['追蹤分點'] == del_br)]
+                st.rerun()
+
     if draw_btn or st.session_state.auto_draw:
         st.session_state.t4_drawn = True
         st.session_state.auto_draw = False 
-        st.session_state.locked_sid = t4_sid.strip().upper()
+        st.session_state.locked_sid = t4_sid_clean
         st.session_state.locked_br_name = t4_br_name
         st.session_state.locked_br_id = BROKER_MAP[t4_br_name]['br_id']
 
-    # 只要曾經畫過，或按了按鈕，就執行繪圖邏輯 (吃快取，極速重繪)
     if st.session_state.t4_drawn:
         sid_to_draw = st.session_state.locked_sid
         br_name_to_draw = st.session_state.locked_br_name
@@ -582,7 +619,6 @@ with tab4:
                     df_merged = pd.merge(df_k, df_broker[['Date', '買賣超']], on='Date', how='left')
                     df_merged['買賣超'] = df_merged['買賣超'].fillna(0) 
                     
-                    # --- 根據選擇的週期進行 Resample ---
                     df_merged.set_index('Date', inplace=True)
                     if t4_period == "週":
                         df_resampled = df_merged.resample('W-FRI').agg({'Open':'first', 'High':'max', 'Low':'min', 'Close':'last', '買賣超':'sum'})
@@ -592,10 +628,8 @@ with tab4:
                         df_resampled = df_merged.copy()
                     
                     df_resampled = df_resampled.dropna(subset=['Close']).reset_index()
-                    # 修正 Hover 日期格式：濾掉小時分鐘，只保留純日期
-                    df_resampled['Date_str'] = df_resampled['Date'].dt.strftime('%Y-%m-%d')
+                    df_resampled['Date_str'] = df_resampled['Date'].dt.strftime('%Y-%m-%d') # 強制轉純日期字串去除 T000
 
-                    # 計算技術指標
                     df_resampled['BB_mid'] = df_resampled['Close'].rolling(int(bb_w)).mean()
                     df_resampled['BB_std'] = df_resampled['Close'].rolling(int(bb_w)).std()
                     df_resampled['BB_up'] = df_resampled['BB_mid'] + bb_std * df_resampled['BB_std']
@@ -612,7 +646,6 @@ with tab4:
                     macd2_plot = macd2.tail(int(t4_days))
                     sig2_plot = sig2.tail(int(t4_days))
                     
-                    # --- 開始繪製 Plotly 專業圖表 ---
                     fig = make_subplots(
                         rows=4, cols=1, shared_xaxes=True, 
                         vertical_spacing=0.03, 
@@ -625,35 +658,31 @@ with tab4:
                     colors_macd1 = ['#FF3333' if val >= 0 else '#00AA00' for val in hist1_plot]
                     colors_macd2 = ['#FF3333' if val >= 0 else '#00AA00' for val in hist2_plot]
 
-                    # 1. K線 (使用字串日期當 X 軸解決時間戳問題)
+                    # 1. K線 (加入 hoverlabel 強制白字深灰底，解決 Dark Mode 看不見的問題)
                     fig.add_trace(go.Candlestick(
                         x=df_plot['Date_str'], open=df_plot['Open'], high=df_plot['High'],
                         low=df_plot['Low'], close=df_plot['Close'], name='K線',
-                        increasing_line_color='#FF3333', decreasing_line_color='#00AA00'
+                        increasing_line_color='#FF3333', decreasing_line_color='#00AA00',
+                        hoverlabel=dict(bgcolor="#222222", font=dict(color="white", size=14), bordercolor="#555555")
                     ), row=1, col=1)
                     
-                    # 1. 布林通道 (補上中軌 SMA)
                     fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=df_plot['BB_mid'], line=dict(color='rgba(255, 255, 255, 0.4)', width=1), name='BB中軌'), row=1, col=1)
                     fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=df_plot['BB_up'], line=dict(color='rgba(173, 216, 230, 0.5)', width=1, dash='dot'), name='BB上軌'), row=1, col=1)
                     fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=df_plot['BB_dn'], fill='tonexty', fillcolor='rgba(173, 216, 230, 0.1)', line=dict(color='rgba(173, 216, 230, 0.5)', width=1, dash='dot'), name='BB下軌'), row=1, col=1)
 
-                    # 2. 券商買賣超
                     fig.add_trace(go.Bar(
                         x=df_plot['Date_str'], y=df_plot['買賣超'], name='買賣超',
                         marker_color=colors_vol, hovertemplate="%{y} 張<extra></extra>"
                     ), row=2, col=1)
 
-                    # 3. MACD 1
                     fig.add_trace(go.Bar(x=df_plot['Date_str'], y=hist1_plot, marker_color=colors_macd1, name='MACD柱'), row=3, col=1)
                     fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=macd1_plot, line=dict(color='yellow', width=1), name='MACD'), row=3, col=1)
                     fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=sig1_plot, line=dict(color='cyan', width=1), name='Signal'), row=3, col=1)
 
-                    # 4. MACD 2
                     fig.add_trace(go.Bar(x=df_plot['Date_str'], y=hist2_plot, marker_color=colors_macd2, name='MACD柱'), row=4, col=1)
                     fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=macd2_plot, line=dict(color='yellow', width=1), name='MACD'), row=4, col=1)
                     fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=sig2_plot, line=dict(color='cyan', width=1), name='Signal'), row=4, col=1)
 
-                    # 圖表美化設定 (無格線、TradingView 風格、解決游標黑色問題)
                     fig.update_layout(
                         height=900,
                         margin=dict(l=10, r=10, t=30, b=10),
@@ -661,17 +690,9 @@ with tab4:
                         font=dict(color='#d1d4dc'),
                         showlegend=False,
                         xaxis_rangeslider_visible=False,
-                        # 加入畫線工具
-                        modebar_add=['drawline', 'drawhline', 'drawvline', 'eraseshape'],
-                        dragmode='pan',
-                        # 強制統一 Hover 樣式，黑底白字高對比
-                        hoverlabel=dict(
-                            bgcolor="#2E2E2E",
-                            font_size=14,
-                            font_family="sans-serif",
-                            font_color="white",
-                            bordercolor="#555555"
-                        )
+                        # 加入完美的畫線工具：drawhline (強制水平線), drawcircle (圓), drawrect (方框)
+                        modebar_add=['drawline', 'drawhline', 'drawrect', 'drawcircle', 'eraseshape'],
+                        dragmode='pan'
                     )
                     fig.update_xaxes(showgrid=False, zeroline=False, type='category') 
                     fig.update_yaxes(showgrid=False, zeroline=False)
