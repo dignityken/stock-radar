@@ -11,28 +11,27 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="籌碼雷達", layout="wide")
 
-# ==========================================
 # 新增修改: 注入 CSS 來影響 st.date_input 的行為
 # ==========================================
 st.markdown(
-    """
-    <style>
-    /* 嘗試讓 date input 欄位看起來不可編輯 */
-    .stDateInput input[type="text"] {
-        pointer-events: none; /* 阻止直接點擊文本輸入部分 */
-        cursor: default; /* 改變鼠標樣式 */
-        user-select: none; /* 阻止選中文本 */
-        -webkit-user-select: none; /* 針對 Safari */
-        -moz-user-select: none; /* 針對 Firefox */
-        /* background-color: #f0f2f6; 可以在需要時改變背景色以強調不可編輯 */
-    }
-    /* 但保留日期選擇圖標的可點擊性 */
-    .stDateInput .css-1dp5xos { /* 這是一個 Streamlit 內部的類，可能隨版本變化，需檢查 */
-        pointer-events: auto;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
+    """
+    <style>
+    /* 嘗試讓 date input 欄位看起來不可編輯 */
+    .stDateInput input[type="text"] {
+        pointer-events: none; /* 阻止直接點擊文本輸入部分 */
+        cursor: default; /* 改變鼠標樣式 */
+        user-select: none; /* 阻止選中文本 */
+        -webkit-user-select: none; /* 針對 Safari */
+        -moz-user-select: none; /* 針對 Firefox */
+        /* background-color: #f0f2f6; 可以在需要時改變背景色以強調不可編輯 */
+    }
+    /* 但保留日期選擇圖標的可點擊性 */
+    .stDateInput .css-1dp5xos { /* 這是一個 Streamlit 內部的類，可能隨版本變化，需檢查 */
+        pointer-events: auto;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
 )
 
 
