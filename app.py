@@ -9,6 +9,8 @@ import urllib3
 # 忽略 SSL 警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+HEADERS = {"User-Agent": "Mozilla/5.0"} # <--- 確保 HEADERS 在這裡被定義！
+
 st.set_page_config(page_title="籌碼雷達", layout="wide")
 
 # ==========================================
