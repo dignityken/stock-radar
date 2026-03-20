@@ -21,13 +21,21 @@ HEADERS = {"User-Agent": "Mozilla/5.0"}
 GOOGLE_DRIVE_HQ_DATA_URL = "https://drive.google.com/file/d/112sWHyGbfuNyOEN2M85wIhWtHj1MqKj5/view?usp=drivesdk"
 GOOGLE_DRIVE_BRANCH_DATA_URL = "https://drive.google.com/file/d/1C6axJwaHq3SFRslODK8m28WRYFDd90x_/view?usp=drivesdk"
 
-# --- 初始化 Session State (用於跨分頁傳遞參數) ---
+# --- 初始化 Session State (用於跨分頁傳遞與繪圖狀態) ---
 if 'jump_sid' not in st.session_state:
     st.session_state.jump_sid = "6488"
 if 'jump_br_name' not in st.session_state:
     st.session_state.jump_br_name = "兆豐-忠孝"
 if 'auto_draw' not in st.session_state:
     st.session_state.auto_draw = False
+if 't4_drawn' not in st.session_state:
+    st.session_state.t4_drawn = False
+if 'locked_sid' not in st.session_state:
+    st.session_state.locked_sid = "6488"
+if 'locked_br_id' not in st.session_state:
+    st.session_state.locked_br_id = "0037003000300061"
+if 'locked_br_name' not in st.session_state:
+    st.session_state.locked_br_name = "兆豐-忠孝"
 
 # --- 函數：從 Google Drive 連結下載內容 ---
 @st.cache_data(ttl=3600) 
@@ -117,7 +125,7 @@ def build_full_broker_db_structure(raw_data_string, hq_data_map):
 UI_TREE, BROKER_MAP = build_full_broker_db_structure(FINAL_RAW_DATA_CLEANED, HQ_DATA)
 
 # ==========================================
-# 0.5 建置「地緣/關鍵字」字典 (新功能)
+# 0.5 建置「地緣/關鍵字」字典 
 # ==========================================
 GEO_MAP = {}
 for br_name, br_info in BROKER_MAP.items():
@@ -146,12 +154,11 @@ def calculate_macd(df, fast, slow, signal):
     hist = macd - sig
     return macd, sig, hist
 
-# --- 輔助函數：自動判斷上市/上櫃並抓取長歷史 K 線 ---
+# --- 輔助函數：快取歷史抓取 (確保切換週期時瞬間繪圖) ---
 @st.cache_data(ttl=3600)
 def get_stock_kline(stock_id):
     end_date = datetime.date.today() + datetime.timedelta(days=1)
-    start_date = "2000-01-01" # 配合富邦抓取極長歷史資料
-    
+    start_date = "2000-01-01" 
     for suffix in ['.TW', '.TWO']:
         ticker = f"{stock_id}{suffix}"
         df = yf.download(ticker, start=start_date, end=end_date, progress=False)
@@ -162,6 +169,24 @@ def get_stock_kline(stock_id):
                 df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
             return df
     return pd.DataFrame()
+
+@st.cache_data(ttl=1800)
+def get_fubon_history(sid, br_id):
+    today_str = datetime.date.today().strftime('%Y-%m-%d')
+    url_history = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?A={sid}&BHID={br_id}&b={br_id}&C=3&D=1999-1-1&E={today_str}&ver=V3"
+    res_hist = requests.get(url_history, headers=HEADERS, verify=False, timeout=20)
+    res_hist.encoding = 'big5'
+    tables = pd.read_html(StringIO(res_hist.text))
+    for tb in tables:
+        if tb.shape[1] == 5 and '日期' in str(tb.iloc[0].values):
+            df_broker = tb.copy()
+            df_broker.columns = ['Date', '買進', '賣出', '總額', '買賣超']
+            df_broker = df_broker.drop(0) 
+            df_broker = df_broker[~df_broker['Date'].str.contains('日期|合計|說明', na=False)].copy()
+            df_broker['Date'] = pd.to_datetime(df_broker['Date'].astype(str).str.replace(' ', ''))
+            df_broker['買賣超'] = pd.to_numeric(df_broker['買賣超'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+            return df_broker
+    return pd.DataFrame(columns=['Date', '買賣超'])
 
 # ==========================================
 # 1. UI 介面設定
@@ -258,19 +283,14 @@ with tab1:
                     only_buy = df_all[df_all['買%'] >= t1_p].copy()
                     only_sell = df_all[df_all['賣%'] >= t1_p].copy()
 
-                for d in [only_buy, only_sell]:
-                    if not d.empty:
-                        d['extracted_stock_id'] = d['股票名稱'].apply(get_stock_id)
-                        d['K線圖'] = d['extracted_stock_id'].apply(lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zcw/zcw1_{sid}.djhtm" if sid else "")
-                        d['分點明細'] = d['extracted_stock_id'].apply(lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={sid}&BHID={sel_br_id}&b={sel_br_id}&C=3" if sid else "")
-                        d['帶入K線'] = False 
-
-                st.subheader(f"🕵️ 分點尋寶結果：{sel_hq} - {sel_br_l}")
-                st.caption(f"📌 區間：{sd_s} ~ {ed_s} | 單位：{t1_u}")
-
                 def display_table_with_button(df_to_show, key_prefix):
                     if not df_to_show.empty:
                         df_show = df_to_show.copy()
+                        df_show['extracted_stock_id'] = df_show['股票名稱'].apply(get_stock_id)
+                        df_show['K線圖'] = df_show['extracted_stock_id'].apply(lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zcw/zcw1_{sid}.djhtm" if sid else "")
+                        df_show['分點明細'] = df_show['extracted_stock_id'].apply(lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={sid}&BHID={sel_br_id}&b={sel_br_id}&C=3" if sid else "")
+                        df_show['帶入K線'] = False 
+                        
                         df_show = df_show[['帶入K線', '股票名稱', 'K線圖', col_buy, col_sell, '總額', '買%', '賣%', '分點明細', 'extracted_stock_id']]
                         col_config = {
                             "K線圖": st.column_config.LinkColumn("網頁K線", display_text="📈", help="外連富邦K線"),
@@ -286,6 +306,9 @@ with tab1:
                             st.session_state.jump_br_name = sel_br_l
                             st.session_state.auto_draw = True
                             st.success(f"✅ 已將 {sid_clicked} 與 {sel_br_l} 參數送到 Tab4！請在最上方手動點擊「📊 主力 K 線圖」分頁。")
+
+                st.subheader(f"🕵️ 分點尋寶結果：{sel_hq} - {sel_br_l}")
+                st.caption(f"📌 區間：{sd_s} ~ {ed_s} | 單位：{t1_u}")
 
                 st.markdown(f"### 🔴 大戶吃貨中 (極端買進) - 共 {len(only_buy)} 檔")
                 display_table_with_button(only_buy.sort_values(by=col_buy, ascending=False).head(999 if show_full else 10), "t1_buy")
@@ -352,13 +375,12 @@ with tab2:
                                 return f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={t2_sid_clean}&BHID={v['br_id']}&b={v['br_id']}&C=3"
                         return ""
 
-                    for d in [b_df, s_df]: 
-                        d['網頁明細'] = d['券商'].apply(get_link_t2)
-                        d['送至 Tab4 繪圖'] = False 
-
                     def display_table_with_button_t2(df_to_show, key_prefix):
                         if not df_to_show.empty:
-                            df_show = df_to_show.copy()[['送至 Tab4 繪圖', '券商', '買', '賣', '合計', '買進%', '賣出%', '網頁明細']]
+                            df_show = df_to_show.copy()
+                            df_show['網頁明細'] = df_show['券商'].apply(get_link_t2)
+                            df_show['送至 Tab4 繪圖'] = False 
+                            df_show = df_show[['送至 Tab4 繪圖', '券商', '買', '賣', '合計', '買進%', '賣出%', '網頁明細']]
                             col_config = {
                                 "網頁明細": st.column_config.LinkColumn("網頁明細", display_text="🏦", help="外連富邦明細"),
                                 "送至 Tab4 繪圖": st.column_config.CheckboxColumn("送至 Tab4 繪圖", help="打勾後請手動切換至分頁四")
@@ -457,52 +479,64 @@ with tab3:
                 else:
                     only_buy = df_all[df_all['買%'] >= t3_p].copy()
                     only_sell = df_all[df_all['賣%'] >= t3_p].copy()
-                for d in [only_buy, only_sell]:
-                    if not d.empty:
-                        d['extracted_stock_id'] = d['股票名稱'].apply(get_stock_id)
-                        d['K線圖'] = d['extracted_stock_id'].apply(lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zcw/zcw1_{sid}.djhtm" if sid else "")
-                        d['分點明細'] = d['extracted_stock_id'].apply(lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={sid}&BHID={sel_t3_br_id}&b={sel_t3_br_id}&C=3" if sid else "")
-                        d.drop(columns=['extracted_stock_id'], inplace=True)
+                
+                def display_table_with_button_t3(df_to_show, key_prefix):
+                    if not df_to_show.empty:
+                        df_show = df_to_show.copy()
+                        df_show['extracted_stock_id'] = df_show['股票名稱'].apply(get_stock_id)
+                        df_show['K線圖'] = df_show['extracted_stock_id'].apply(lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zcw/zcw1_{sid}.djhtm" if sid else "")
+                        df_show['分點明細'] = df_show['extracted_stock_id'].apply(lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={sid}&BHID={sel_t3_br_id}&b={sel_t3_br_id}&C=3" if sid else "")
+                        df_show['帶入K線'] = False 
+                        df_show = df_show[['帶入K線', '股票名稱', 'K線圖', col_buy, col_sell, '總額', '買%', '賣%', '分點明細', 'extracted_stock_id']]
+                        col_config = {
+                            "K線圖": st.column_config.LinkColumn("網頁K線", display_text="📈"),
+                            "分點明細": st.column_config.LinkColumn("網頁明細", display_text="🏦"),
+                            "帶入K線": st.column_config.CheckboxColumn("送至 Tab4 繪圖"),
+                            "extracted_stock_id": None 
+                        }
+                        edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=f"editor_{key_prefix}")
+                        clicked_rows = edited_df[edited_df['帶入K線'] == True]
+                        if not clicked_rows.empty:
+                            sid_clicked = clicked_rows.iloc[0]['extracted_stock_id']
+                            st.session_state.jump_sid = sid_clicked
+                            st.session_state.jump_br_name = sel_t3_br_l
+                            st.session_state.auto_draw = True
+                            st.success(f"✅ 已將 {sid_clicked} 與 {sel_t3_br_l} 參數送到 Tab4！請手動切換至「📊 主力 K 線圖」。")
 
                 st.subheader(f"🕵️ 地緣雷達結果：{sel_t3_br_l}")
                 st.caption(f"📌 區間：{sd_s} ~ {ed_s} | 單位：{t3_u}")
-                display_cols = ['股票名稱', 'K線圖', col_buy, col_sell, '總額', '買%', '賣%', '分點明細']
-                col_config = {"K線圖": st.column_config.LinkColumn("K線圖", display_text="📈 看圖"), "分點明細": st.column_config.LinkColumn("分點明細", display_text="🏦 看分點")}
                 st.markdown(f"### 🔴 該分點吃貨中 (極端買進) - 共 {len(only_buy)} 檔")
-                if not only_buy.empty: st.dataframe(only_buy.sort_values(by=col_buy, ascending=False).head(999 if show_full_t3 else 10)[display_cols], hide_index=True, column_config=col_config, use_container_width=True)
-                else: st.info("無符合條件之股票")
+                display_table_with_button_t3(only_buy.sort_values(by=col_buy, ascending=False).head(999 if show_full_t3 else 10), "t3_buy")
                 st.markdown(f"### 🟢 該分點倒貨中 (極端賣出) - 共 {len(only_sell)} 檔")
-                if not only_sell.empty: st.dataframe(only_sell.sort_values(by=col_sell, ascending=False).head(999 if show_full_t3 else 10)[display_cols], hide_index=True, column_config=col_config, use_container_width=True)
-                else: st.info("無符合條件之股票")
+                display_table_with_button_t3(only_sell.sort_values(by=col_sell, ascending=False).head(999 if show_full_t3 else 10), "t3_sell")
             else: st.warning("抓取不到數據。請檢查股票代號或券商分點是否正確。")
         except Exception as e: st.error(f"發生錯誤: {e}")
-
 
 # --- Tab 4 (專業主力 K 線圖) ---
 with tab4:
     st.markdown("### 📊 專業主力 K 線與分點進出圖")
     st.caption("將醜陋的網頁轉化為專業 TradingView 質感的分析圖表。支援歷史回溯與多週期切換。")
     
-    col1, col2, col3 = st.columns([1, 2, 1])
+    col1, col2, col3, col4 = st.columns([1, 1.5, 1, 1])
     with col1:
-        t4_sid = st.text_input("輸入股票代號 (如: 6488)", st.session_state.jump_sid, key="t4_sid")
+        t4_sid = st.text_input("股票代號", st.session_state.jump_sid, key="t4_sid")
     with col2:
         all_br_names = sorted(list(BROKER_MAP.keys()))
-        passed_br = st.session_state.jump_br_name
-        cleaned_passed_br = passed_br.replace("亚","亞").strip()
-        default_br_idx = all_br_names.index(cleaned_passed_br) if cleaned_passed_br in all_br_names else 0
-        t4_br_name = st.selectbox("搜尋/選擇分點", all_br_names, index=default_br_idx, key="t4_br")
+        passed_br = st.session_state.jump_br_name.replace("亚","亞").strip()
+        default_br_idx = all_br_names.index(passed_br) if passed_br in all_br_names else 0
+        t4_br_name = st.selectbox("搜尋分點", all_br_names, index=default_br_idx, key="t4_br")
     with col3:
+        # 直接把週期切換放在外面，切換時即刻重繪
+        t4_period = st.radio("K線週期", ["日", "週", "月"], horizontal=True, key="t4_period")
+    with col4:
         st.write("") 
         draw_btn = st.button("🎨 繪製專業圖表", use_container_width=True)
 
     with st.expander("⚙️ 圖表與技術指標設定"):
-        tc1, tc2, tc3 = st.columns([1,1,2])
+        tc1, tc2 = st.columns([1,2])
         with tc1: 
-            t4_period = st.radio("K線週期", ["日", "週", "月"], horizontal=True)
-        with tc2:
-            t4_days = st.number_input("顯示最近幾根K棒?", value=80, min_value=10, max_value=500)
-
+            t4_days = st.number_input("顯示最近幾根K棒?", value=200, min_value=10, max_value=1000)
+        
         st.markdown("---")
         sc1, sc2, sc3 = st.columns(3)
         with sc1: 
@@ -520,45 +554,31 @@ with tab4:
             macd2_s = st.number_input("長線-慢線", value=52)
             macd2_sig = st.number_input("長線-訊號", value=18)
 
+    # 將觸發條件與快取狀態綁定，實現「切換週期不用按按鈕即刻重繪」
     if draw_btn or st.session_state.auto_draw:
+        st.session_state.t4_drawn = True
         st.session_state.auto_draw = False 
-        
-        t4_sid_clean = t4_sid.strip().upper()
-        t4_br_info = BROKER_MAP[t4_br_name]
-        t4_br_id = t4_br_info['br_id']
-        today_str = datetime.date.today().strftime('%Y-%m-%d')
-        
-        with st.spinner(f"正在為您跨時空調取 {t4_sid_clean} 歷史資料並繪製專業圖表，請稍候... (資料龐大約需 5-10 秒)"):
-            try:
-                # 1. 抓取歷史 K 線 (從 2000 年開始)
-                df_k = get_stock_kline(t4_sid_clean)
-                if df_k.empty:
-                    st.error(f"找不到代號 {t4_sid_clean} 的 K 線資料，目前本繪圖功能暫不支援無 yfinance 資料之標的。")
-                else:
-                    # 2. 抓取富邦全歷史明細 (使用 A=參數 與 D=1999-1-1 密技)
-                    url_history = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?A={t4_sid_clean}&BHID={t4_br_id}&b={t4_br_id}&C=3&D=1999-1-1&E={today_str}&ver=V3"
-                    res_hist = requests.get(url_history, headers=HEADERS, verify=False, timeout=20) # 歷史久，拉長 timeout
-                    res_hist.encoding = 'big5'
-                    
-                    df_broker = pd.DataFrame()
-                    tables = pd.read_html(StringIO(res_hist.text))
-                    for tb in tables:
-                        if tb.shape[1] == 5 and '日期' in str(tb.iloc[0].values):
-                            df_broker = tb.copy()
-                            df_broker.columns = ['Date', '買進', '賣出', '總額', '買賣超']
-                            df_broker = df_broker.drop(0) 
-                            break
-                    
-                    # 處理券商資料格式
-                    if not df_broker.empty:
-                        df_broker = df_broker[~df_broker['Date'].str.contains('日期|合計|說明', na=False)].copy()
-                        df_broker['Date'] = pd.to_datetime(df_broker['Date'].astype(str).str.replace(' ', ''))
-                        df_broker['買賣超'] = pd.to_numeric(df_broker['買賣超'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-                    else:
-                        df_broker = pd.DataFrame(columns=['Date', '買賣超'])
-                        st.info(f"備註：歷史紀錄中，{t4_br_name} 在 {t4_sid_clean} 沒有交易紀錄。")
+        st.session_state.locked_sid = t4_sid.strip().upper()
+        st.session_state.locked_br_name = t4_br_name
+        st.session_state.locked_br_id = BROKER_MAP[t4_br_name]['br_id']
 
-                    # 合併 K 線與券商資料
+    # 只要曾經畫過，或按了按鈕，就執行繪圖邏輯 (吃快取，極速重繪)
+    if st.session_state.t4_drawn:
+        sid_to_draw = st.session_state.locked_sid
+        br_name_to_draw = st.session_state.locked_br_name
+        br_id_to_draw = st.session_state.locked_br_id
+        
+        with st.spinner(f"正在調取 {sid_to_draw} 歷史資料並繪製專業圖表，請稍候..."):
+            try:
+                df_k = get_stock_kline(sid_to_draw)
+                if df_k.empty:
+                    st.error(f"找不到代號 {sid_to_draw} 的 K 線資料，請確認是否為台股且具備 yfinance 資料。")
+                else:
+                    df_broker = get_fubon_history(sid_to_draw, br_id_to_draw)
+                    
+                    if df_broker.empty:
+                        st.info(f"備註：歷史紀錄中，{br_name_to_draw} 在 {sid_to_draw} 沒有交易紀錄。")
+
                     df_merged = pd.merge(df_k, df_broker[['Date', '買賣超']], on='Date', how='left')
                     df_merged['買賣超'] = df_merged['買賣超'].fillna(0) 
                     
@@ -572,19 +592,18 @@ with tab4:
                         df_resampled = df_merged.copy()
                     
                     df_resampled = df_resampled.dropna(subset=['Close']).reset_index()
+                    # 修正 Hover 日期格式：濾掉小時分鐘，只保留純日期
+                    df_resampled['Date_str'] = df_resampled['Date'].dt.strftime('%Y-%m-%d')
 
-                    # 計算技術指標 (在合併且切換週期後計算，確保準確)
-                    # 布林通道 (BB)
+                    # 計算技術指標
                     df_resampled['BB_mid'] = df_resampled['Close'].rolling(int(bb_w)).mean()
                     df_resampled['BB_std'] = df_resampled['Close'].rolling(int(bb_w)).std()
                     df_resampled['BB_up'] = df_resampled['BB_mid'] + bb_std * df_resampled['BB_std']
                     df_resampled['BB_dn'] = df_resampled['BB_mid'] - bb_std * df_resampled['BB_std']
                     
-                    # MACD
                     macd1, sig1, hist1 = calculate_macd(df_resampled, int(macd1_f), int(macd1_s), int(macd1_sig))
                     macd2, sig2, hist2 = calculate_macd(df_resampled, int(macd2_f), int(macd2_s), int(macd2_sig))
                     
-                    # 取最後 N 根 K棒來畫圖
                     df_plot = df_resampled.tail(int(t4_days)).copy()
                     hist1_plot = hist1.tail(int(t4_days))
                     macd1_plot = macd1.tail(int(t4_days))
@@ -598,7 +617,7 @@ with tab4:
                         rows=4, cols=1, shared_xaxes=True, 
                         vertical_spacing=0.03, 
                         row_heights=[0.5, 0.2, 0.15, 0.15],
-                        subplot_titles=("K線與布林通道", f"分點買賣超 ({t4_br_name})", "MACD (短線)", "MACD (長線)")
+                        subplot_titles=("K線與布林通道", f"分點買賣超 ({br_name_to_draw})", "MACD (短線)", "MACD (長線)")
                     )
                     
                     colors_k = ['#FF3333' if close >= open else '#00AA00' for close, open in zip(df_plot['Close'], df_plot['Open'])]
@@ -606,50 +625,57 @@ with tab4:
                     colors_macd1 = ['#FF3333' if val >= 0 else '#00AA00' for val in hist1_plot]
                     colors_macd2 = ['#FF3333' if val >= 0 else '#00AA00' for val in hist2_plot]
 
-                    # 1. K線
+                    # 1. K線 (使用字串日期當 X 軸解決時間戳問題)
                     fig.add_trace(go.Candlestick(
-                        x=df_plot['Date'], open=df_plot['Open'], high=df_plot['High'],
+                        x=df_plot['Date_str'], open=df_plot['Open'], high=df_plot['High'],
                         low=df_plot['Low'], close=df_plot['Close'], name='K線',
                         increasing_line_color='#FF3333', decreasing_line_color='#00AA00'
                     ), row=1, col=1)
                     
-                    # 1. 布林通道 (拔掉均線，加上 BB)
-                    fig.add_trace(go.Scatter(x=df_plot['Date'], y=df_plot['BB_up'], line=dict(color='rgba(173, 216, 230, 0.5)', width=1, dash='dot'), name='BB_Up'), row=1, col=1)
-                    fig.add_trace(go.Scatter(x=df_plot['Date'], y=df_plot['BB_dn'], fill='tonexty', fillcolor='rgba(173, 216, 230, 0.1)', line=dict(color='rgba(173, 216, 230, 0.5)', width=1, dash='dot'), name='BB_Dn'), row=1, col=1)
+                    # 1. 布林通道 (補上中軌 SMA)
+                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=df_plot['BB_mid'], line=dict(color='rgba(255, 255, 255, 0.4)', width=1), name='BB中軌'), row=1, col=1)
+                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=df_plot['BB_up'], line=dict(color='rgba(173, 216, 230, 0.5)', width=1, dash='dot'), name='BB上軌'), row=1, col=1)
+                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=df_plot['BB_dn'], fill='tonexty', fillcolor='rgba(173, 216, 230, 0.1)', line=dict(color='rgba(173, 216, 230, 0.5)', width=1, dash='dot'), name='BB下軌'), row=1, col=1)
 
-                    # 2. 券商買賣超柱狀圖
+                    # 2. 券商買賣超
                     fig.add_trace(go.Bar(
-                        x=df_plot['Date'], y=df_plot['買賣超'], name='買賣超(張)',
-                        marker_color=colors_vol
+                        x=df_plot['Date_str'], y=df_plot['買賣超'], name='買賣超',
+                        marker_color=colors_vol, hovertemplate="%{y} 張<extra></extra>"
                     ), row=2, col=1)
 
                     # 3. MACD 1
-                    fig.add_trace(go.Bar(x=df_plot['Date'], y=hist1_plot, marker_color=colors_macd1, name='MACD 柱'), row=3, col=1)
-                    fig.add_trace(go.Scatter(x=df_plot['Date'], y=macd1_plot, line=dict(color='yellow', width=1), name='MACD'), row=3, col=1)
-                    fig.add_trace(go.Scatter(x=df_plot['Date'], y=sig1_plot, line=dict(color='cyan', width=1), name='Signal'), row=3, col=1)
+                    fig.add_trace(go.Bar(x=df_plot['Date_str'], y=hist1_plot, marker_color=colors_macd1, name='MACD柱'), row=3, col=1)
+                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=macd1_plot, line=dict(color='yellow', width=1), name='MACD'), row=3, col=1)
+                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=sig1_plot, line=dict(color='cyan', width=1), name='Signal'), row=3, col=1)
 
                     # 4. MACD 2
-                    fig.add_trace(go.Bar(x=df_plot['Date'], y=hist2_plot, marker_color=colors_macd2, name='MACD 柱'), row=4, col=1)
-                    fig.add_trace(go.Scatter(x=df_plot['Date'], y=macd2_plot, line=dict(color='yellow', width=1), name='MACD'), row=4, col=1)
-                    fig.add_trace(go.Scatter(x=df_plot['Date'], y=sig2_plot, line=dict(color='cyan', width=1), name='Signal'), row=4, col=1)
+                    fig.add_trace(go.Bar(x=df_plot['Date_str'], y=hist2_plot, marker_color=colors_macd2, name='MACD柱'), row=4, col=1)
+                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=macd2_plot, line=dict(color='yellow', width=1), name='MACD'), row=4, col=1)
+                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=sig2_plot, line=dict(color='cyan', width=1), name='Signal'), row=4, col=1)
 
-                    # 圖表美化設定 (無格線、TradingView 風格)
+                    # 圖表美化設定 (無格線、TradingView 風格、解決游標黑色問題)
                     fig.update_layout(
                         height=900,
                         margin=dict(l=10, r=10, t=30, b=10),
-                        plot_bgcolor='#131722', paper_bgcolor='#131722', # 更深的 TradingView 底色
+                        plot_bgcolor='#131722', paper_bgcolor='#131722',
                         font=dict(color='#d1d4dc'),
                         showlegend=False,
                         xaxis_rangeslider_visible=False,
-                        # 開啟繪圖工具列
-                        modebar_add=['drawline', 'drawopenpath', 'drawcircle', 'drawrect', 'eraseshape'],
-                        dragmode='pan'
+                        # 加入畫線工具
+                        modebar_add=['drawline', 'drawhline', 'drawvline', 'eraseshape'],
+                        dragmode='pan',
+                        # 強制統一 Hover 樣式，黑底白字高對比
+                        hoverlabel=dict(
+                            bgcolor="#2E2E2E",
+                            font_size=14,
+                            font_family="sans-serif",
+                            font_color="white",
+                            bordercolor="#555555"
+                        )
                     )
-                    # 關閉所有格線 showgrid=False
                     fig.update_xaxes(showgrid=False, zeroline=False, type='category') 
                     fig.update_yaxes(showgrid=False, zeroline=False)
 
-                    # 顯示圖表 (開啟 config 讓繪圖工具顯示)
                     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True, 'scrollZoom': True})
 
             except Exception as e:
