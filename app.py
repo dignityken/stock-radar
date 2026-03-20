@@ -105,33 +105,37 @@ def build_full_broker_db_structure(raw_data_string, hq_data_map):
 
 UI_TREE, BROKER_MAP = build_full_broker_db_structure(FINAL_RAW_DATA_CLEANED, HQ_DATA)
 
+# ==========================================
+# 0.5 建置「地緣/關鍵字」字典 (新功能)
+# ==========================================
+GEO_MAP = {}
+for br_name, br_info in BROKER_MAP.items():
+    if "-" in br_name:
+        # 取 "-" 後面的字串作為地緣名稱，並移除(停)等雜訊以利分類
+        loc_name = br_name.split("-")[-1].replace("(停)", "").strip()
+        if loc_name not in GEO_MAP:
+            GEO_MAP[loc_name] = {}
+        GEO_MAP[loc_name][br_name] = br_info
+
+
 def get_stock_id(name_str):
-    """
-    從股票名稱字串中提取股票代號。
-    終極防呆：精準區分「代號的英文字母」與「股票的英文名稱」！
-    """
     s = str(name_str).strip()
     s = unicodedata.normalize('NFKC', s)
     s = s.replace(" ", "")
     
-    # 規則 1: 處理像 00984B, 2881A 這種「結尾只有單一個英文字母」的代號
-    # (?![A-Za-z]) 是核心關鍵：確保這個字母的「下一個字元」絕對不能是英文字母！
     match_with_letter = re.match(r'^(\d+[A-Za-z])(?![A-Za-z])', s)
-    if match_with_letter:
-        return match_with_letter.group(1).upper()
+    if match_with_letter: return match_with_letter.group(1).upper()
         
-    # 規則 2: 處理像 4971IET-KY, 6902GOGOLOOK 這種「後面跟著一整串英文名字」的股票
-    # 直接無視後面的英文，只抓開頭的純數字
     match_digits_only = re.match(r'^(\d+)', s)
-    if match_digits_only:
-        return match_digits_only.group(1).upper()
+    if match_digits_only: return match_digits_only.group(1).upper()
         
     return None
 
 # ==========================================
 # 1. UI 介面設定
 # ==========================================
-tab1, tab2 = st.tabs(["🚀 券商分點查股票", "📊 股票代號查分點"])
+# 新增 Tab 3
+tab1, tab2, tab3 = st.tabs(["🚀 券商分點查股票", "📊 股票代號查分點", "📍 地緣券商尋寶"])
 
 # --- Tab 1 ---
 with tab1:
@@ -223,16 +227,12 @@ with tab1:
                     only_buy = df_all[df_all['買%'] >= t1_p].copy()
                     only_sell = df_all[df_all['賣%'] >= t1_p].copy()
 
-                # --- 核心連結生成 (加入K線圖與分點明細連結) ---
                 for d in [only_buy, only_sell]:
                     if not d.empty:
                         d['extracted_stock_id'] = d['股票名稱'].apply(get_stock_id)
-                        
-                        # K線圖連結 
                         d['K線圖'] = d['extracted_stock_id'].apply(
                             lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zcw/zcw1_{sid}.djhtm" if sid else ""
                         )
-                        # 分點明細連結 
                         d['分點明細'] = d['extracted_stock_id'].apply(
                             lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={sid}&BHID={sel_br_id}&b={sel_br_id}&C=3" if sid else ""
                         )
@@ -338,3 +338,137 @@ with tab2:
             except requests.exceptions.Timeout: st.error("請求超時，請稍後再試。")
             except requests.exceptions.RequestException as e: st.error(f"網絡請求錯誤: {e}")
             except Exception as e: st.error(f"發生錯誤: {e}")
+
+
+# --- Tab 3 (全新功能：地緣券商尋寶) ---
+with tab3:
+    st.markdown("### 📍 尋找地緣/同名分點進出")
+    st.caption("透過分點名稱後綴（例如：城中、三重、信義）跨券商尋找特定地區的買賣神人。")
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        # 下拉選單：列出所有整理好的地名/關鍵字
+        sorted_loc_keys = sorted(GEO_MAP.keys())
+        default_loc_idx = sorted_loc_keys.index('城中') if '城中' in sorted_loc_keys else 0
+        sel_loc = st.selectbox("選擇地緣關鍵字 (支援手動輸入搜尋)", sorted_loc_keys, index=default_loc_idx, key="t3_loc_sel")
+    with c2:
+        # 根據選擇的地名，連動列出該地區的所有分公司
+        loc_branches = GEO_MAP[sel_loc]
+        sorted_loc_br_keys = sorted(loc_branches.keys())
+        sel_t3_br_l = st.selectbox("選擇該區特定分點", sorted_loc_br_keys, key="t3_br_sel")
+        
+        # 取得要用來查詢的代碼
+        sel_t3_br_info = loc_branches[sel_t3_br_l]
+        sel_t3_hq_id = sel_t3_br_info['hq_id']
+        sel_t3_br_id = sel_t3_br_info['br_id']
+
+    c3, c4, c5 = st.columns(3)
+    with c3: t3_sd = st.date_input("區間起點", datetime.date.today()-datetime.timedelta(days=7), key="t3_sd")
+    with c4: t3_ed = st.date_input("區間終點", datetime.date.today(), key="t3_ed")
+    with c5: t3_u = st.radio("統計單位", ["張數", "金額"], horizontal=True, key="t3_unit")
+
+    c6, c7, c8 = st.columns([1.5, 1, 1])
+    with c6: t3_mode = st.radio("篩選條件", ["嚴格模式 (只買不賣)", "濾網模式 (自訂佔比)"], index=1, horizontal=True, key="t3_mode")
+    with c7: t3_p = st.number_input("佔比 >= (%)", 0.0, 100.0, 95.0, step=1.0, key="t3_pct")
+    with c8: st.write(""); show_full_t3 = st.checkbox("顯示完整清單", value=False, key="t3_full")
+
+    # 這裡的運作邏輯完美繼承 Tab 1，只是帶入的券商代碼是從地緣字典抓的
+    if st.button("啟動地緣雷達 📡", key="t3_go"):
+        sd_s, ed_s = t3_sd.strftime('%Y-%m-%d'), t3_ed.strftime('%Y-%m-%d')
+
+        is_amount = '金額' in t3_u
+        c_param = "B" if is_amount else "E"
+        col_buy = '買進金額' if is_amount else '買進張數'
+        col_sell = '賣出金額' if is_amount else '賣出張數'
+        
+        url = f"https://fubon-ebrokerdj.fbs.com.tw/z/zg/zgb/zgb0.djhtm?a={sel_t3_hq_id}&b={sel_t3_br_id}&c={c_param}&e={sd_s}&f={ed_s}"
+        
+        try:
+            res = requests.get(url, headers=HEADERS, verify=False, timeout=15)
+            res.encoding = 'big5'
+            html_text = res.text
+
+            def extract_stock_name_from_script(match):
+                script_content = match.group(0)
+                m = re.search(r"GenLink2stk\s*\(\s*['\"](?:AS)?([^'\"]+)['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)", script_content, re.IGNORECASE)
+                if m:
+                    stock_id = m.group(1).strip()
+                    stock_name = m.group(2).strip()
+                    return f"{stock_id}{stock_name}"
+                return ""
+
+            processed_html_text = re.sub(r"<script[^>]*>(?:(?!</script>).)*GenLink2stk\s*\([^)]+\).*?</script>", extract_stock_name_from_script, html_text, flags=re.IGNORECASE | re.DOTALL)
+            
+            tables = pd.read_html(StringIO(processed_html_text))
+            df_all = pd.DataFrame()
+
+            for tb in tables:
+                if tb.shape[1] < 3: continue
+                if any(word in str(tb) for word in ['買進','賣出','張數','金額','股票名稱']):
+                    if tb.shape[1] >= 8:
+                        l = tb.iloc[:, [0, 1, 2]].copy(); l.columns=['股票名稱', col_buy, col_sell]
+                        r = tb.iloc[:, [5, 6, 7]].copy(); r.columns=['股票名稱', col_buy, col_sell]
+                        df_all = pd.concat([df_all, l, r], ignore_index=True)
+                    else:
+                        temp = tb.iloc[:, [0, 1, 2]].copy(); temp.columns=['股票名稱', col_buy, col_sell]
+                        df_all = pd.concat([df_all, temp], ignore_index=True)
+
+            if not df_all.empty:
+                df_all['股票名稱'] = df_all['股票名稱'].astype(str).str.strip()
+                invalid_patterns = ['名稱', '買進', '賣出', '合計', '說明', '註', '差額', '請選擇', 'nan', 'NaN', 'None', r'^\s*$']
+                df_all = df_all[~df_all['股票名稱'].str.contains('|'.join(invalid_patterns), na=False)]
+                
+                df_all = df_all[df_all['股票名稱'].apply(lambda x: bool(get_stock_id(x)))].copy()
+                
+                for c in [col_buy, col_sell]:
+                    df_all[c] = pd.to_numeric(df_all[c].astype(str).str.replace(',',''), errors='coerce').fillna(0)
+                
+                df_all['總額'] = df_all[col_buy] + df_all[col_sell]
+                df_all = df_all[df_all['總額'] > 0].copy()
+                df_all['買%'] = (df_all[col_buy] / df_all['總額'] * 100).round(1)
+                df_all['賣%'] = (df_all[col_sell] / df_all['總額'] * 100).round(1)
+
+                if '嚴格' in t3_mode:
+                    only_buy = df_all[(df_all[col_buy] > 0) & (df_all[col_sell] == 0)].copy()
+                    only_sell = df_all[(df_all[col_sell] > 0) & (df_all[col_buy] == 0)].copy()
+                else:
+                    only_buy = df_all[df_all['買%'] >= t3_p].copy()
+                    only_sell = df_all[df_all['賣%'] >= t3_p].copy()
+
+                for d in [only_buy, only_sell]:
+                    if not d.empty:
+                        d['extracted_stock_id'] = d['股票名稱'].apply(get_stock_id)
+                        d['K線圖'] = d['extracted_stock_id'].apply(
+                            lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zcw/zcw1_{sid}.djhtm" if sid else ""
+                        )
+                        d['分點明細'] = d['extracted_stock_id'].apply(
+                            lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={sid}&BHID={sel_t3_br_id}&b={sel_t3_br_id}&C=3" if sid else ""
+                        )
+                        d.drop(columns=['extracted_stock_id'], inplace=True)
+
+                st.subheader(f"🕵️ 地緣雷達結果：{sel_t3_br_l}")
+                st.caption(f"📌 區間：{sd_s} ~ {ed_s} | 單位：{t3_u}")
+
+                display_cols = ['股票名稱', 'K線圖', col_buy, col_sell, '總額', '買%', '賣%', '分點明細']
+                col_config = {
+                    "K線圖": st.column_config.LinkColumn("K線圖", display_text="📈 看圖", help="點擊查看個股技術線圖"),
+                    "分點明細": st.column_config.LinkColumn("分點明細", display_text="🏦 看分點", help="點擊查看此分點在該檔股票的進出明細")
+                }
+
+                st.markdown(f"### 🔴 該分點吃貨中 (極端買進) - 共 {len(only_buy)} 檔")
+                if not only_buy.empty:
+                    only_buy = only_buy.sort_values(by=col_buy, ascending=False)
+                    final_b = only_buy if show_full_t3 else only_buy.head(10)
+                    st.dataframe(final_b[display_cols], hide_index=True, column_config=col_config, use_container_width=True)
+                else: st.info("無符合條件之股票")
+
+                st.markdown(f"### 🟢 該分點倒貨中 (極端賣出) - 共 {len(only_sell)} 檔")
+                if not only_sell.empty:
+                    only_sell = only_sell.sort_values(by=col_sell, ascending=False)
+                    final_s = only_sell if show_full_t3 else only_sell.head(10)
+                    st.dataframe(final_s[display_cols], hide_index=True, column_config=col_config, use_container_width=True)
+                else: st.info("無符合條件之股票")
+            else: st.warning("抓取不到數據。請檢查股票代號或券商分點是否正確。")
+        except requests.exceptions.Timeout: st.error("請求超時，請稍後再試。")
+        except requests.exceptions.RequestException as e: st.error(f"網絡請求錯誤: {e}")
+        except Exception as e: st.error(f"發生錯誤: {e}")
