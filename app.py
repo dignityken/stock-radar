@@ -134,8 +134,8 @@ def get_stock_id(name_str):
 # ==========================================
 # 1. UI 介面設定
 # ==========================================
-# 新增 Tab 3
-tab1, tab2, tab3 = st.tabs(["🚀 券商分點查股票", "📊 股票代號查分點", "📍 地緣券商尋寶"])
+# 新增 Tab 4
+tab1, tab2, tab3, tab4 = st.tabs(["🚀 券商分點查股票", "📊 股票代號查分點", "📍 地緣券商尋寶", "📊 主力 K 線圖"])
 
 # --- Tab 1 ---
 with tab1:
@@ -472,3 +472,179 @@ with tab3:
         except requests.exceptions.Timeout: st.error("請求超時，請稍後再試。")
         except requests.exceptions.RequestException as e: st.error(f"網絡請求錯誤: {e}")
         except Exception as e: st.error(f"發生錯誤: {e}")
+            import yfinance as yf
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+# --- 輔助函數：計算 MACD ---
+def calculate_macd(df, fast, slow, signal):
+    exp1 = df['Close'].ewm(span=fast, adjust=False).mean()
+    exp2 = df['Close'].ewm(span=slow, adjust=False).mean()
+    macd = exp1 - exp2
+    sig = macd.ewm(span=signal, adjust=False).mean()
+    hist = macd - sig
+    return macd, sig, hist
+
+# --- 輔助函數：自動判斷上市/上櫃並抓取 K 線 ---
+@st.cache_data(ttl=3600)
+def get_stock_kline(stock_id, days=120):
+    # 台灣股票需要加上 .TW (上市) 或 .TWO (上櫃)
+    # 我們自動嘗試兩種
+    end_date = datetime.date.today() + datetime.timedelta(days=1)
+    start_date = end_date - datetime.timedelta(days=days)
+    
+    for suffix in ['.TW', '.TWO']:
+        ticker = f"{stock_id}{suffix}"
+        df = yf.download(ticker, start=start_date, end=end_date, progress=False)
+        if not df.empty:
+            df.reset_index(inplace=True)
+            # 確保 Date 欄位沒有時區問題
+            df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
+            return df
+    return pd.DataFrame()
+
+# --- Tab 4 (全新功能：專業主力 K 線圖) ---
+# 記得在最上面的 st.tabs 中把 Tab 4 加進去！
+# st.tabs(["🚀 券商分點查股票", "📊 股票代號查分點", "📍 地緣券商尋寶", "📊 主力 K 線圖"])
+# (這裡假設您已經在最上面宣告了 tab4，如果沒有，請把這段寫在 tab4 裡面)
+
+# 如果您最上面的 st.tabs 還沒加 tab4，請先去上面改成：
+# tab1, tab2, tab3, tab4 = st.tabs(["🚀 券商分點查股票", "📊 股票代號查分點", "📍 地緣券商尋寶", "📊 主力 K 線圖"])
+
+with tab4:
+    st.markdown("### 📊 專業主力 K 線與分點進出圖")
+    st.caption("將醜陋的網頁轉化為專業 TradingView 質感的分析圖表。")
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col1:
+        t4_sid = st.text_input("輸入股票代號 (如: 6488)", "6488", key="t4_sid")
+    with col2:
+        # 提供所有分點讓使用者搜尋選擇
+        all_br_names = sorted(list(BROKER_MAP.keys()))
+        default_br_idx = all_br_names.index('兆豐-忠孝') if '兆豐-忠孝' in all_br_names else 0
+        t4_br_name = st.selectbox("搜尋/選擇分點", all_br_names, index=default_br_idx, key="t4_br")
+    with col3:
+        st.write("") # 排版用
+        draw_btn = st.button("🎨 繪製專業圖表", use_container_width=True)
+
+    with st.expander("⚙️ MACD 參數設定"):
+        mc1, mc2, mc3 = st.columns(3)
+        with mc1: st.markdown("**副圖 2 (短線 MACD)**")
+        with mc2: st.markdown("**副圖 3 (長線 MACD)**")
+        with mc3: st.write("")
+        
+        mc1_1, mc1_2, mc1_3 = st.columns(3)
+        with mc1_1: macd1_f = st.number_input("短線-快線", value=12)
+        with mc1_2: macd1_s = st.number_input("短線-慢線", value=26)
+        with mc1_3: macd1_sig = st.number_input("短線-訊號", value=9)
+        
+        mc2_1, mc2_2, mc2_3 = st.columns(3)
+        with mc2_1: macd2_f = st.number_input("長線-快線", value=26)
+        with mc2_2: macd2_s = st.number_input("長線-慢線", value=52)
+        with mc2_3: macd2_sig = st.number_input("長線-訊號", value=18)
+
+    if draw_btn:
+        t4_sid_clean = t4_sid.strip().upper()
+        t4_br_info = BROKER_MAP[t4_br_name]
+        t4_br_id = t4_br_info['br_id']
+        
+        with st.spinner("正在為您繪製專業圖表，請稍候..."):
+            try:
+                # 1. 抓取 K 線資料 (抓近半年)
+                df_k = get_stock_kline(t4_sid_clean, days=180)
+                if df_k.empty:
+                    st.error("找不到該股票的 K 線資料，請確認代號是否正確 (暫不支援 ETF 等無 yfinance 資料之標的)。")
+                else:
+                    # 2. 抓取 MoneyDJ 分點進出明細 (歷史預設近60日)
+                    # 我們直接解析它網頁裡的「進出明細表」
+                    url_history = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={t4_sid_clean}&BHID={t4_br_id}&b={t4_br_id}&C=3"
+                    res_hist = requests.get(url_history, headers=HEADERS, verify=False, timeout=15)
+                    res_hist.encoding = 'big5'
+                    
+                    df_broker = pd.DataFrame()
+                    tables = pd.read_html(StringIO(res_hist.text))
+                    for tb in tables:
+                        # 尋找包含「買賣超」的歷史明細表格
+                        if tb.shape[1] == 5 and '日期' in str(tb.iloc[0].values):
+                            df_broker = tb.copy()
+                            df_broker.columns = ['Date', '買進', '賣出', '總額', '買賣超']
+                            df_broker = df_broker.drop(0) # 移除標題列
+                            break
+                    
+                    if df_broker.empty:
+                        st.warning(f"近期內，{t4_br_name} 在 {t4_sid_clean} 沒有交易紀錄。")
+                    else:
+                        # 處理券商資料格式
+                        df_broker = df_broker[~df_broker['Date'].str.contains('日期|合計|說明', na=False)].copy()
+                        df_broker['Date'] = pd.to_datetime(df_broker['Date'].astype(str).str.replace(' ', ''))
+                        df_broker['買賣超'] = pd.to_numeric(df_broker['買賣超'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+                        
+                        # 合併 K 線與券商資料
+                        df_merged = pd.merge(df_k, df_broker[['Date', '買賣超']], on='Date', how='left')
+                        df_merged['買賣超'] = df_merged['買賣超'].fillna(0) # 沒交易的日子補 0
+                        
+                        # 只取最近 60 個交易日來畫圖，版面最好看
+                        df_plot = df_merged.tail(60).copy()
+                        
+                        # 計算 MACD
+                        macd1, sig1, hist1 = calculate_macd(df_plot, macd1_f, macd1_s, macd1_sig)
+                        macd2, sig2, hist2 = calculate_macd(df_plot, macd2_f, macd2_s, macd2_sig)
+                        
+                        # --- 開始繪製 Plotly 專業圖表 ---
+                        fig = make_subplots(
+                            rows=4, cols=1, shared_xaxes=True, 
+                            vertical_spacing=0.03, 
+                            row_heights=[0.5, 0.2, 0.15, 0.15],
+                            subplot_titles=("K線圖", f"分點買賣超 ({t4_br_name})", "MACD (短線)", "MACD (長線)")
+                        )
+                        
+                        # 定義台灣股市顏色 (紅漲綠跌)
+                        colors_k = ['#FF3333' if close >= open else '#00AA00' for close, open in zip(df_plot['Close'], df_plot['Open'])]
+                        colors_vol = ['#FF3333' if val >= 0 else '#00AA00' for val in df_plot['買賣超']]
+                        colors_macd1 = ['#FF3333' if val >= 0 else '#00AA00' for val in hist1]
+                        colors_macd2 = ['#FF3333' if val >= 0 else '#00AA00' for val in hist2]
+
+                        # 副圖 1: K線
+                        fig.add_trace(go.Candlestick(
+                            x=df_plot['Date'], open=df_plot['Open'], high=df_plot['High'],
+                            low=df_plot['Low'], close=df_plot['Close'], name='K線',
+                            increasing_line_color='#FF3333', decreasing_line_color='#00AA00'
+                        ), row=1, col=1)
+                        
+                        # 加上 5日、10日均線
+                        fig.add_trace(go.Scatter(x=df_plot['Date'], y=df_plot['Close'].rolling(5).mean(), line=dict(color='orange', width=1), name='5MA'), row=1, col=1)
+                        fig.add_trace(go.Scatter(x=df_plot['Date'], y=df_plot['Close'].rolling(10).mean(), line=dict(color='blue', width=1), name='10MA'), row=1, col=1)
+
+                        # 副圖 2: 券商買賣超柱狀圖
+                        fig.add_trace(go.Bar(
+                            x=df_plot['Date'], y=df_plot['買賣超'], name='買賣超(張)',
+                            marker_color=colors_vol
+                        ), row=2, col=1)
+
+                        # 副圖 3: MACD 1
+                        fig.add_trace(go.Bar(x=df_plot['Date'], y=hist1, marker_color=colors_macd1, name='MACD 柱'), row=3, col=1)
+                        fig.add_trace(go.Scatter(x=df_plot['Date'], y=macd1, line=dict(color='yellow', width=1), name='MACD'), row=3, col=1)
+                        fig.add_trace(go.Scatter(x=df_plot['Date'], y=sig1, line=dict(color='cyan', width=1), name='Signal'), row=3, col=1)
+
+                        # 副圖 4: MACD 2
+                        fig.add_trace(go.Bar(x=df_plot['Date'], y=hist2, marker_color=colors_macd2, name='MACD 柱'), row=4, col=1)
+                        fig.add_trace(go.Scatter(x=df_plot['Date'], y=macd2, line=dict(color='yellow', width=1), name='MACD'), row=4, col=1)
+                        fig.add_trace(go.Scatter(x=df_plot['Date'], y=sig2, line=dict(color='cyan', width=1), name='Signal'), row=4, col=1)
+
+                        # 圖表美化設定
+                        fig.update_layout(
+                            height=900,
+                            margin=dict(l=10, r=10, t=30, b=10),
+                            plot_bgcolor='#1E1E1E', paper_bgcolor='#1E1E1E',
+                            font=dict(color='white'),
+                            showlegend=False,
+                            xaxis_rangeslider_visible=False # 隱藏底部的範圍拉桿
+                        )
+                        fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='#333333', type='category') # 用 category 隱藏假日空白
+                        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#333333')
+
+                        # 顯示圖表
+                        st.plotly_chart(fig, use_container_width=True)
+
+            except Exception as e:
+                st.error(f"繪圖發生錯誤: {e}")
