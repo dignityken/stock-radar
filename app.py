@@ -15,6 +15,86 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="籌碼雷達", layout="wide")
 
+# ==========================================
+# 🔒 進入門檻：訂閱制期限密碼權限控管系統
+# ==========================================
+def check_password():
+    """判斷使用者是否輸入了正確且未過期的密碼"""
+    
+    # 防呆：如果後台沒設定 Secrets，預設給一組到 2099 年都不會過期的密碼方便測試
+    if "passwords" not in st.secrets:
+        valid_passwords = {"測試帳號": "120001|2099-12-31"} 
+    else:
+        valid_passwords = st.secrets["passwords"]
+
+    def password_entered():
+        user_pwd_input = st.session_state["pwd_input"].strip()
+        
+        match_found = False
+        is_expired = False
+        
+        # 尋找是否有吻合的密碼
+        for user, auth_string in valid_passwords.items():
+            # 解析密碼與日期，格式為 "密碼|2024-12-31"
+            parts = str(auth_string).split("|")
+            pwd = parts[0].strip()
+            # 如果沒有設定直線|與日期，預設為無限期
+            exp_date_str = parts[1].strip() if len(parts) > 1 else "2099-12-31" 
+            
+            if user_pwd_input == pwd:
+                match_found = True
+                # 檢查期限
+                try:
+                    exp_date = datetime.datetime.strptime(exp_date_str, "%Y-%m-%d").date()
+                    today = datetime.date.today()
+                    if today > exp_date:
+                        is_expired = True
+                except ValueError:
+                    pass # 若日期格式寫錯，容錯處理直接當作未過期
+                break # 找到密碼就跳出迴圈
+
+        # 根據驗證結果設定狀態
+        if match_found and not is_expired:
+            st.session_state["password_correct"] = True
+            del st.session_state["pwd_input"]  # 安全考量，清空輸入框
+        elif match_found and is_expired:
+            st.session_state["password_correct"] = "expired"
+        else:
+            st.session_state["password_correct"] = False
+
+    # 如果已經驗證成功，直接放行
+    if st.session_state.get("password_correct") == True:
+        return True
+
+    # 登入畫面 UI
+    st.markdown("<br><br><h1 style='text-align: center;'>🔒 籌碼雷達 - 專屬權限登入</h1>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        st.text_input(
+            "請輸入您的專屬通行密碼：", 
+            type="password", 
+            on_change=password_entered, 
+            key="pwd_input",
+            placeholder="輸入後請按 Enter"
+        )
+        
+        status = st.session_state.get("password_correct")
+        if status == False:
+            st.error("🚫 密碼錯誤，請重新輸入。")
+        elif status == "expired":
+            st.warning("⚠️ 您的會員權限已到期，請洽管理員。")
+            
+    return False
+
+# 🛑 如果密碼沒過或是已過期，程式就在這裡停止，不執行後方的機密程式碼！
+if not check_password():
+    st.stop()  
+
+# ==========================================
+# 通過驗證後，開始執行主程式
+# ==========================================
+
 HEADERS = {"User-Agent": "Mozilla/5.0"} 
 
 # --- Google Drive 文件連結 ---
@@ -29,7 +109,7 @@ if 't4_drawn' not in st.session_state: st.session_state.t4_drawn = False
 if 'locked_sid' not in st.session_state: st.session_state.locked_sid = "6488"
 if 'locked_br_id' not in st.session_state: st.session_state.locked_br_id = "0037003000300061"
 if 'locked_br_name' not in st.session_state: st.session_state.locked_br_name = "兆豐-忠孝"
-if 'watchlist' not in st.session_state: st.session_state.watchlist = [] # 新增：追蹤清單
+if 'watchlist' not in st.session_state: st.session_state.watchlist = []
 
 # --- 函數：從 Google Drive 連結下載內容 ---
 @st.cache_data(ttl=3600) 
@@ -526,12 +606,10 @@ with tab4:
         draw_btn = st.button("🎨 繪製專業圖表", use_container_width=True)
     with col5:
         st.write("")
-        # --- 新增：加入追蹤清單按鈕 ---
         fav_btn = st.button("❤️ 加入追蹤清單", use_container_width=True)
 
     t4_sid_clean = t4_sid.strip().upper()
     
-    # --- 處理加入最愛邏輯 ---
     if fav_btn:
         entry = {"股票代號": t4_sid_clean, "追蹤分點": t4_br_name}
         if entry not in st.session_state.watchlist:
@@ -562,7 +640,6 @@ with tab4:
             macd2_s = st.number_input("長線-慢線", value=52)
             macd2_sig = st.number_input("長線-訊號", value=18)
 
-    # --- 新增：顯示我的追蹤清單 ---
     if st.session_state.watchlist:
         with st.expander("⭐ 我的主力追蹤清單 (打勾可直接載入圖表)", expanded=False):
             wl_df = pd.DataFrame(st.session_state.watchlist)
@@ -575,7 +652,6 @@ with tab4:
             }
             edited_wl = st.data_editor(wl_df, hide_index=True, column_config=wl_config, use_container_width=True, key="wl_editor")
             
-            # 處理載入
             load_rows = edited_wl[edited_wl['載入繪圖'] == True]
             if not load_rows.empty:
                 load_sid = load_rows.iloc[0]['股票代號']
@@ -583,9 +659,8 @@ with tab4:
                 st.session_state.jump_sid = load_sid
                 st.session_state.jump_br_name = load_br
                 st.session_state.auto_draw = True
-                st.rerun() # 強制刷新頁面載入參數
+                st.rerun() 
                 
-            # 處理刪除
             del_rows = edited_wl[edited_wl['刪除此筆'] == True]
             if not del_rows.empty:
                 del_sid = del_rows.iloc[0]['股票代號']
@@ -628,7 +703,7 @@ with tab4:
                         df_resampled = df_merged.copy()
                     
                     df_resampled = df_resampled.dropna(subset=['Close']).reset_index()
-                    df_resampled['Date_str'] = df_resampled['Date'].dt.strftime('%Y-%m-%d') # 強制轉純日期字串去除 T000
+                    df_resampled['Date_str'] = df_resampled['Date'].dt.strftime('%Y-%m-%d') 
 
                     df_resampled['BB_mid'] = df_resampled['Close'].rolling(int(bb_w)).mean()
                     df_resampled['BB_std'] = df_resampled['Close'].rolling(int(bb_w)).std()
@@ -658,30 +733,40 @@ with tab4:
                     colors_macd1 = ['#FF3333' if val >= 0 else '#00AA00' for val in hist1_plot]
                     colors_macd2 = ['#FF3333' if val >= 0 else '#00AA00' for val in hist2_plot]
 
-                    # 1. K線 (加入 hoverlabel 強制白字深灰底，解決 Dark Mode 看不見的問題)
+                    # 💎 終極 Hover 格式修正：強制黑底白字高對比，解決所有黑暗模式盲點
+                    custom_hover = (
+                        "<b>日期: %{x}</b><br><br>"
+                        "<b>開盤: %{open:.2f}</b><br>"
+                        "<b>最高: %{high:.2f}</b><br>"
+                        "<b>最低: %{low:.2f}</b><br>"
+                        "<b>收盤: %{close:.2f}</b><br>"
+                        "<extra></extra>"
+                    )
+
                     fig.add_trace(go.Candlestick(
                         x=df_plot['Date_str'], open=df_plot['Open'], high=df_plot['High'],
                         low=df_plot['Low'], close=df_plot['Close'], name='K線',
                         increasing_line_color='#FF3333', decreasing_line_color='#00AA00',
+                        hovertemplate=custom_hover,
                         hoverlabel=dict(bgcolor="#222222", font=dict(color="white", size=14), bordercolor="#555555")
                     ), row=1, col=1)
                     
-                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=df_plot['BB_mid'], line=dict(color='rgba(255, 255, 255, 0.4)', width=1), name='BB中軌'), row=1, col=1)
-                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=df_plot['BB_up'], line=dict(color='rgba(173, 216, 230, 0.5)', width=1, dash='dot'), name='BB上軌'), row=1, col=1)
-                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=df_plot['BB_dn'], fill='tonexty', fillcolor='rgba(173, 216, 230, 0.1)', line=dict(color='rgba(173, 216, 230, 0.5)', width=1, dash='dot'), name='BB下軌'), row=1, col=1)
+                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=df_plot['BB_mid'], line=dict(color='rgba(255, 255, 255, 0.4)', width=1), name='BB中軌', hoverinfo='skip'), row=1, col=1)
+                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=df_plot['BB_up'], line=dict(color='rgba(173, 216, 230, 0.5)', width=1, dash='dot'), name='BB上軌', hoverinfo='skip'), row=1, col=1)
+                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=df_plot['BB_dn'], fill='tonexty', fillcolor='rgba(173, 216, 230, 0.1)', line=dict(color='rgba(173, 216, 230, 0.5)', width=1, dash='dot'), name='BB下軌', hoverinfo='skip'), row=1, col=1)
 
                     fig.add_trace(go.Bar(
                         x=df_plot['Date_str'], y=df_plot['買賣超'], name='買賣超',
-                        marker_color=colors_vol, hovertemplate="%{y} 張<extra></extra>"
+                        marker_color=colors_vol, hovertemplate="<b>%{y} 張</b><extra></extra>"
                     ), row=2, col=1)
 
-                    fig.add_trace(go.Bar(x=df_plot['Date_str'], y=hist1_plot, marker_color=colors_macd1, name='MACD柱'), row=3, col=1)
-                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=macd1_plot, line=dict(color='yellow', width=1), name='MACD'), row=3, col=1)
-                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=sig1_plot, line=dict(color='cyan', width=1), name='Signal'), row=3, col=1)
+                    fig.add_trace(go.Bar(x=df_plot['Date_str'], y=hist1_plot, marker_color=colors_macd1, name='MACD柱', hovertemplate="<b>%{y:.2f}</b><extra></extra>"), row=3, col=1)
+                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=macd1_plot, line=dict(color='yellow', width=1), name='MACD', hoverinfo='skip'), row=3, col=1)
+                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=sig1_plot, line=dict(color='cyan', width=1), name='Signal', hoverinfo='skip'), row=3, col=1)
 
-                    fig.add_trace(go.Bar(x=df_plot['Date_str'], y=hist2_plot, marker_color=colors_macd2, name='MACD柱'), row=4, col=1)
-                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=macd2_plot, line=dict(color='yellow', width=1), name='MACD'), row=4, col=1)
-                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=sig2_plot, line=dict(color='cyan', width=1), name='Signal'), row=4, col=1)
+                    fig.add_trace(go.Bar(x=df_plot['Date_str'], y=hist2_plot, marker_color=colors_macd2, name='MACD柱', hovertemplate="<b>%{y:.2f}</b><extra></extra>"), row=4, col=1)
+                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=macd2_plot, line=dict(color='yellow', width=1), name='MACD', hoverinfo='skip'), row=4, col=1)
+                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=sig2_plot, line=dict(color='cyan', width=1), name='Signal', hoverinfo='skip'), row=4, col=1)
 
                     fig.update_layout(
                         height=900,
@@ -690,11 +775,10 @@ with tab4:
                         font=dict(color='#d1d4dc'),
                         showlegend=False,
                         xaxis_rangeslider_visible=False,
-                        # 加入完美的畫線工具：drawhline (強制水平線), drawcircle (圓), drawrect (方框)
                         modebar_add=['drawline', 'drawhline', 'drawrect', 'drawcircle', 'eraseshape'],
                         dragmode='pan'
                     )
-                    fig.update_xaxes(showgrid=False, zeroline=False, type='category') 
+                    fig.update_xaxes(showgrid=False, zeroline=False, type='category', showspikes=True, spikemode='across', spikethickness=1, spikedash='dot', spikecolor='#555555') 
                     fig.update_yaxes(showgrid=False, zeroline=False)
 
                     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True, 'scrollZoom': True})
