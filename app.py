@@ -11,61 +11,54 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="籌碼雷達", layout="wide")
 
-HEADERS = {"User-Agent": "Mozilla/5.0"} # 確保 HEADERS 在這裡被定義！
+HEADERS = {"User-Agent": "Mozilla/5.0"} 
 
 # --- Google Drive 文件連結 ---
 GOOGLE_DRIVE_HQ_DATA_URL = "https://drive.google.com/file/d/112sWHyGbfuNyOEN2M85wIhWtHj1MqKj5/view?usp=drivesdk"
 GOOGLE_DRIVE_BRANCH_DATA_URL = "https://drive.google.com/file/d/1C6axJwaHq3SFRslODK8m28WRYFDd90x_/view?usp=drivesdk"
 
 # --- 函數：從 Google Drive 連結下載內容 ---
-@st.cache_data(ttl=3600) # 快取數據，每小時更新一次
+@st.cache_data(ttl=3600) 
 def download_google_drive_file(url):
-    """從Google Drive公開連結下載文件內容"""
-    file_id = url.split('/')[-2] # 從URL中提取文件ID
+    file_id = url.split('/')[-2] 
     download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
     try:
         response = requests.get(download_url, stream=True, verify=False, timeout=10)
-        response.raise_for_status() # 檢查請求是否成功
+        response.raise_for_status() 
         return response.text
     except requests.exceptions.RequestException as e:
         st.error(f"從Google Drive下載文件失敗: {e}")
         return None
 
 # --- 載入數據 ---
-@st.cache_data(ttl=3600) # 快取解析後的 HQ_DATA
+@st.cache_data(ttl=3600) 
 def load_hq_data(url):
     content = download_google_drive_file(url)
-    if not content:
-        return {}
-    
+    if not content: return {}
     hq_data = {}
     for line in content.strip().split('\n'):
-        if "\t" in line and not line.startswith("證券商代號"): # 跳過標題行
+        if "\t" in line and not line.startswith("證券商代號"): 
             parts = line.split('\t')
             if len(parts) == 2:
                 hq_data[parts[0].strip()] = parts[1].strip()
     return hq_data
 
-@st.cache_data(ttl=3600) # 快取解析後的 FINAL_RAW_DATA_CLEANED
+@st.cache_data(ttl=3600) 
 def load_branch_data(url):
     content = download_google_drive_file(url)
-    if not content:
-        return ""
+    if not content: return ""
     return content.strip().lstrip("'").rstrip("'")
 
-# 載入 HQ_DATA 和 FINAL_RAW_DATA_CLEANED
 HQ_DATA = load_hq_data(GOOGLE_DRIVE_HQ_DATA_URL)
 FINAL_RAW_DATA_CLEANED = load_branch_data(GOOGLE_DRIVE_BRANCH_DATA_URL)
 
 # ==========================================
 # 0. 完整數據庫建置
 # ==========================================
-
 def build_full_broker_db_structure(raw_data_string, hq_data_map):
     tree = {}; name_map = {}
     for group_str in raw_data_string.strip().split(';'):
         if not group_str: continue
-
         parts = group_str.split('!')
         if not parts: continue
 
@@ -114,13 +107,12 @@ UI_TREE, BROKER_MAP = build_full_broker_db_structure(FINAL_RAW_DATA_CLEANED, HQ_
 def get_stock_id(name_str):
     """
     從股票名稱字串中提取股票代號。
-    支援純數字代號 (至少4位) 和字母數字混合代號 (如 ETF)。
+    修正：直接抓取開頭連續的「英文字母與數字」組合，解決 00984B 遺漏 B 的問題。
     """
     s = str(name_str).strip()
-    match_num = re.match(r'^(\d{4,})', s)
-    if match_num: return match_num.group(1)
-    match_alpha_num = re.match(r'^([a-zA-Z0-9]+)', s)
-    if match_alpha_num: return match_alpha_num.group(1)
+    match = re.match(r'^([a-zA-Z0-9]{4,})', s)
+    if match:
+        return match.group(1)
     return None
 
 # ==========================================
@@ -223,11 +215,11 @@ with tab1:
                     if not d.empty:
                         d['extracted_stock_id'] = d['股票名稱'].apply(get_stock_id)
                         
-                        # K線圖連結 (對應富邦網頁版技術線圖)
+                        # K線圖連結 
                         d['K線圖'] = d['extracted_stock_id'].apply(
                             lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zcw/zcw1_{sid}.djhtm" if sid else ""
                         )
-                        # 分點明細連結 (直接查詢該分點買賣該檔股票的狀況)
+                        # 分點明細連結 
                         d['分點明細'] = d['extracted_stock_id'].apply(
                             lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={sid}&BHID={sel_br_id}&b={sel_br_id}&C=3" if sid else ""
                         )
@@ -236,7 +228,6 @@ with tab1:
                 st.subheader(f"🕵️ 分點尋寶結果：{sel_hq} - {sel_br_l}")
                 st.caption(f"📌 區間：{sd_s} ~ {ed_s} | 單位：{t1_u}")
 
-                # 定義要顯示的欄位順序與UI設定
                 display_cols = ['股票名稱', 'K線圖', col_buy, col_sell, '總額', '買%', '賣%', '分點明細']
                 col_config = {
                     "K線圖": st.column_config.LinkColumn("K線圖", display_text="📈 看圖", help="點擊查看個股技術線圖"),
@@ -268,16 +259,19 @@ with tab2:
     with c1: t2_sid = st.text_input("股票代號", "2408", key="t2_s")
     with c2: t2_sd = st.date_input("開始", datetime.date.today()-datetime.timedelta(days=7), key="t2_sd_in")
     with c3: t2_ed = st.date_input("結束", datetime.date.today(), key="t2_ed_in")
-    c4, c5, c6 = st.columns([2, 1, 1])
+    
+    c4, c5, c6, c7 = st.columns([2, 1, 1, 1.2])
     with c4: t2_m = st.radio("模式", ["嚴格模式", "濾網模式"], index=1, horizontal=True, key="t2_mode")
     with c5: t2_p = st.number_input("門檻佔比%", 0, 100, 95, step=1, key="t2_p_in")
     with c6: t2_v = st.number_input("最低張數", 0, 1000000, 10, step=1, key="t2_v_in")
+    with c7: st.write(""); show_full_t2 = st.checkbox("顯示完整清單", value=False, key="t2_full")
 
     if st.button("開始籌碼追蹤 🚀", key="t2_btn"):
-        if not t2_sid.strip().replace(" ", "").isalnum(): 
+        t2_sid_clean = t2_sid.strip().replace(" ", "")
+        if not t2_sid_clean.isalnum(): 
             st.error("股票代號必須是字母數字組合。")
         else:
-            url = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco.djhtm?a={t2_sid}&e={t2_sd.strftime('%Y-%m-%d')}&f={t2_ed.strftime('%Y-%m-%d')}"
+            url = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco.djhtm?a={t2_sid_clean}&e={t2_sd.strftime('%Y-%m-%d')}&f={t2_ed.strftime('%Y-%m-%d')}"
             try:
                 res = requests.get(url, headers=HEADERS, verify=False, timeout=15)
                 res.encoding = 'big5'
@@ -309,19 +303,24 @@ with tab2:
                         name_cleaned = broker_name.replace("亞","亞").strip()
                         info = BROKER_MAP.get(name_cleaned)
                         if info:
-                            return f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={t2_sid}&BHID={info['br_id']}&b={info['br_id']}&C=3"
+                            return f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={t2_sid_clean}&BHID={info['br_id']}&b={info['br_id']}&C=3"
                         
                         for k, v in BROKER_MAP.items():
                             if name_cleaned in k or k in name_cleaned:
-                                return f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={t2_sid}&BHID={v['br_id']}&b={v['br_id']}&C=3"
+                                return f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={t2_sid_clean}&BHID={v['br_id']}&b={v['br_id']}&C=3"
                         return ""
 
                     for d in [b_df, s_df]: d['查看詳情'] = d['券商'].apply(get_link_t2)
 
                     st.subheader("🔴 吃貨主力分點")
-                    st.dataframe(b_df.sort_values('買', ascending=False), hide_index=True, column_config={"查看詳情": st.column_config.LinkColumn("查看詳情", display_text="🏦 看分點", help="點擊查看分點進出明細")}, use_container_width=True)
+                    b_df_sorted = b_df.sort_values('買', ascending=False)
+                    final_b_t2 = b_df_sorted if show_full_t2 else b_df_sorted.head(10)
+                    st.dataframe(final_b_t2, hide_index=True, column_config={"查看詳情": st.column_config.LinkColumn("查看詳情", display_text="🏦 看分點", help="點擊查看分點進出明細")}, use_container_width=True)
+                    
                     st.subheader("🟢 倒貨主力分點")
-                    st.dataframe(s_df.sort_values('賣', ascending=False), hide_index=True, column_config={"查看詳情": st.column_config.LinkColumn("查看詳情", display_text="🏦 看分點", help="點擊查看分點進出明細")}, use_container_width=True)
+                    s_df_sorted = s_df.sort_values('賣', ascending=False)
+                    final_s_t2 = s_df_sorted if show_full_t2 else s_df_sorted.head(10)
+                    st.dataframe(final_s_t2, hide_index=True, column_config={"查看詳情": st.column_config.LinkColumn("查看詳情", display_text="🏦 看分點", help="點擊查看分點進出明細")}, use_container_width=True)
                 else: st.warning("未找到資料。請檢查股票代號或日期區間。")
             except requests.exceptions.Timeout: st.error("請求超時，請稍後再試。")
             except requests.exceptions.RequestException as e: st.error(f"網絡請求錯誤: {e}")
