@@ -5,6 +5,7 @@ from io import StringIO
 import re
 import datetime
 import urllib3
+import unicodedata
 
 # 忽略 SSL 警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -107,12 +108,24 @@ UI_TREE, BROKER_MAP = build_full_broker_db_structure(FINAL_RAW_DATA_CLEANED, HQ_
 def get_stock_id(name_str):
     """
     從股票名稱字串中提取股票代號。
-    終極修正：抓取開頭連續的「英文字母與數字」，完美解決 00984B 遺漏 B 的問題！
+    終極防呆：精準區分「代號的英文字母」與「股票的英文名稱」！
     """
     s = str(name_str).strip()
-    match = re.match(r'^([A-Za-z0-9]+)', s)
-    if match:
-        return match.group(1).upper()
+    s = unicodedata.normalize('NFKC', s)
+    s = s.replace(" ", "")
+    
+    # 規則 1: 處理像 00984B, 2881A 這種「結尾只有單一個英文字母」的代號
+    # (?![A-Za-z]) 是核心關鍵：確保這個字母的「下一個字元」絕對不能是英文字母！
+    match_with_letter = re.match(r'^(\d+[A-Za-z])(?![A-Za-z])', s)
+    if match_with_letter:
+        return match_with_letter.group(1).upper()
+        
+    # 規則 2: 處理像 4971IET-KY, 6902GOGOLOOK 這種「後面跟著一整串英文名字」的股票
+    # 直接無視後面的英文，只抓開頭的純數字
+    match_digits_only = re.match(r'^(\d+)', s)
+    if match_digits_only:
+        return match_digits_only.group(1).upper()
+        
     return None
 
 # ==========================================
