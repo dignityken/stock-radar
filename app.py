@@ -10,38 +10,61 @@ import yfinance as yf
 import json
 import streamlit.components.v1 as components
 
+# ==========================================
+# 🆕 嘗試載入 Google Sheets 相關套件
+# ==========================================
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials
+    GSHEETS_AVAILABLE = True
+except ImportError:
+    GSHEETS_AVAILABLE = False
+
 # 忽略 SSL 警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="籌碼雷達", layout="wide")
 
 # ==========================================
-# 🔒 進入門檻：通行密碼與免登書籤系統
+# 🔒 進入門檻：通行密碼與免登書籤系統 (修正網址洩漏)
 # ==========================================
 def check_password():
     valid_passwords = st.secrets.get("passwords", {"測試帳號": "0000|2099-12-31"})
     query_params = st.query_params
+    
+    # 透過網址 Token 登入
     if "token" in query_params:
         url_token = query_params["token"]
-        for auth_string in valid_passwords.values():
+        for user, auth_string in valid_passwords.items():
             if url_token == auth_string.split("|")[0].strip():
                 exp_date_str = auth_string.split("|")[1].strip() if "|" in auth_string else "2099-12-31"
                 try:
                     if datetime.date.today() <= datetime.datetime.strptime(exp_date_str, "%Y-%m-%d").date():
+                        st.session_state["password_correct"] = True
+                        st.session_state["username"] = user
+                        st.session_state["user_token"] = url_token
+                        st.query_params.clear()  # 🌟 瞬間清除網址參數，防止分享外流！
                         return True
                 except:
+                    st.session_state["password_correct"] = True
+                    st.session_state["username"] = user
+                    st.session_state["user_token"] = url_token
+                    st.query_params.clear()  # 🌟 瞬間清除網址參數
                     return True
 
+    # 手動輸入密碼登入
     def password_entered():
         user_pwd_input = st.session_state["pwd_input"].strip()
         match_found = False
         is_expired = False
+        matched_user = ""
         for user, auth_string in valid_passwords.items():
             parts = str(auth_string).split("|")
             pwd = parts[0].strip()
             exp_date_str = parts[1].strip() if len(parts) > 1 else "2099-12-31" 
             if user_pwd_input == pwd:
                 match_found = True
+                matched_user = user
                 try:
                     if datetime.date.today() > datetime.datetime.strptime(exp_date_str, "%Y-%m-%d").date():
                         is_expired = True
@@ -50,14 +73,17 @@ def check_password():
 
         if match_found and not is_expired:
             st.session_state["password_correct"] = True
-            st.query_params["token"] = user_pwd_input
+            st.session_state["username"] = matched_user
+            st.session_state["user_token"] = user_pwd_input
+            st.query_params.clear()  # 確保網址列乾淨
             del st.session_state["pwd_input"]  
         elif match_found and is_expired:
             st.session_state["password_correct"] = "expired"
         else:
             st.session_state["password_correct"] = False
 
-    if st.session_state.get("password_correct") == True: return True
+    if st.session_state.get("password_correct") == True: 
+        return True
 
     st.markdown("<br><br><h1 style='text-align: center;'>🔒 籌碼雷達</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center;'>成功登入後，將網址加入書籤即可免重複輸入密碼。</p>", unsafe_allow_html=True)
@@ -73,25 +99,107 @@ def check_password():
 if not check_password(): st.stop()  
 
 # ==========================================
+# 🆕 Google Sheets 雲端資料庫互動函數
+# ==========================================
+@st.cache_resource(ttl=3600)
+def init_gsheets():
+    if not GSHEETS_AVAILABLE or "gcp_service_account" not in st.secrets or "gsheets" not in st.secrets:
+        return None
+    try:
+        scopes = ['https://www.googleapis.com/auth/spreadsheets']
+        creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
+        client = gspread.authorize(creds)
+        sheet_url = st.secrets["gsheets"]["spreadsheet_url"]
+        doc = client.open_by_url(sheet_url)
+        try:
+            ws = doc.worksheet("Watchlist")
+        except gspread.exceptions.WorksheetNotFound:
+            ws = doc.add_worksheet(title="Watchlist", rows="1000", cols="2")
+            ws.update_acell('A1', 'Username')
+            ws.update_acell('B1', 'WatchlistJSON')
+        return ws
+    except Exception as e:
+        print(f"GSheets 連線錯誤: {e}")
+        return None
+
+def load_gsheet_watchlist(username):
+    ws = init_gsheets()
+    if not ws: return []
+    try:
+        cell = ws.find(username, in_column=1)
+        if cell:
+            data = ws.cell(cell.row, 2).value
+            if data:
+                return json.loads(data)
+    except gspread.exceptions.CellNotFound:
+        pass
+    except Exception:
+        pass
+    return []
+
+def save_gsheet_watchlist(username, wl_list):
+    ws = init_gsheets()
+    if not ws: return
+    try:
+        data_str = json.dumps(wl_list, ensure_ascii=False)
+        try:
+            cell = ws.find(username, in_column=1)
+            ws.update_cell(cell.row, 2, data_str)
+        except gspread.exceptions.CellNotFound:
+            ws.append_row([username, data_str])
+    except Exception as e:
+        print(f"GSheets 儲存錯誤: {e}")
+
+# ==========================================
+# 側邊欄：顯示登入者與專屬書籤連結
+# ==========================================
+with st.sidebar:
+    current_user = st.session_state.get('username', 'VIP會員')
+    st.markdown(f"### 👤 登入身份：{current_user}")
+    st.caption("✅ 網址列已隱藏密碼，直接複製分享網址絕對安全。")
+    with st.expander("🔗 取得免登入書籤網址"):
+        st.write("若要在您的電腦/手機免密碼登入，請將下方參數**接在您的網站主網址後方**並加入書籤：")
+        st.code(f"?token={st.session_state.get('user_token', '')}", language="text")
+        st.caption("⚠️ 此參數等同您的密碼，請勿外流！")
+        
+    if not GSHEETS_AVAILABLE or "gcp_service_account" not in st.secrets:
+        st.warning("⚠️ 系統未偵測到 Google Sheets 金鑰，清單將僅暫存於本次連線。")
+
+# ==========================================
 # 初始化全域變數與 Session State
 # ==========================================
-HEADERS = {"User-Agent": "Mozilla/5.0"} 
-GOOGLE_DRIVE_HQ_DATA_URL = "https://drive.google.com/file/d/112sWHyGbfuNyOEN2M85wIhWtHj1MqKj5/view?usp=drivesdk"
-GOOGLE_DRIVE_BRANCH_DATA_URL = "https://drive.google.com/file/d/1C6axJwaHq3SFRslODK8m28WRYFDd90x_/view?usp=drivesdk"
-
 for tab in ['t1', 't2', 't3']:
     if f'{tab}_searched' not in st.session_state: st.session_state[f'{tab}_searched'] = False
     if f'{tab}_buy_df' not in st.session_state: st.session_state[f'{tab}_buy_df'] = pd.DataFrame()
     if f'{tab}_sell_df' not in st.session_state: st.session_state[f'{tab}_sell_df'] = pd.DataFrame()
 
-# ✅ 強制綁定唯一 Key，確保傳送資料不會錯亂
 if 't4_target_sid' not in st.session_state: st.session_state.t4_target_sid = "6488"
 if 't4_target_br' not in st.session_state: st.session_state.t4_target_br = "兆豐-忠孝"
 if 'auto_draw' not in st.session_state: st.session_state.auto_draw = False
-if 'watchlist' not in st.session_state: st.session_state.watchlist = []
 if 'custom_hlines' not in st.session_state: st.session_state.custom_hlines = []
-# ✅ 加入表格重置計數器 (解決打勾留存衝突問題)
 if 'table_refresh_key' not in st.session_state: st.session_state.table_refresh_key = 0
+
+# 🌟 從 Google Sheets 載入該會員專屬的 Watchlist (每次開啟網頁只載入一次)
+if 'watchlist_loaded' not in st.session_state:
+    st.session_state.watchlist = load_gsheet_watchlist(current_user)
+    st.session_state.watchlist_loaded = True
+
+def send_to_tab4(sid, br_name):
+    st.session_state.t4_target_sid = str(sid).strip().upper()
+    clean_br = str(br_name).replace("亚","亞").strip()
+    matched_br = None
+    if clean_br in BROKER_MAP:
+        matched_br = clean_br
+    else:
+        for k in BROKER_MAP.keys():
+            if clean_br in k or k in clean_br:
+                matched_br = k
+                break
+    if matched_br:
+        st.session_state.t4_target_br = matched_br
+        
+    st.session_state.auto_draw = True
+    st.rerun()
 
 # ==========================================
 # 資料載入與處理函數
@@ -334,11 +442,9 @@ with tab1:
                     "extracted_stock_id": None 
                 }
                 
-                # ✅ 加入動態 Refresh Key 解決多選衝突 UX 問題
                 editor_key = f"editor_{key_prefix}_{st.session_state.table_refresh_key}"
                 edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=editor_key)
                 
-                # 攔截打勾事件並發送
                 if editor_key in st.session_state:
                     edits = st.session_state[editor_key].get('edited_rows', {})
                     for row_idx, changes in edits.items():
@@ -347,7 +453,7 @@ with tab1:
                             st.session_state.t4_target_sid = sid_clicked
                             st.session_state.t4_target_br = sel_br_l
                             st.session_state.auto_draw = True
-                            st.session_state.table_refresh_key += 1 # 強制重置表格取消打勾
+                            st.session_state.table_refresh_key += 1
                             st.rerun()
 
         col_b = '買進金額' if '金額' in t1_u else '買進張數'
@@ -429,7 +535,6 @@ with tab2:
                     "送至 Tab4 繪圖": st.column_config.CheckboxColumn("送至 Tab4 繪圖", help="打勾後請手動切換至分頁四")
                 }
                 
-                # ✅ 加入動態 Refresh Key
                 editor_key = f"editor_{key_prefix}_{st.session_state.table_refresh_key}"
                 edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=editor_key)
                 
@@ -439,14 +544,13 @@ with tab2:
                         if changes.get('送至 Tab4 繪圖', False) == True:
                             br_clicked = df_show.iloc[row_idx]['券商']
                             st.session_state.t4_target_sid = t2_sid_clean
-                            # 模糊匹配並賦值給 Tab 4
                             clean_br = br_clicked.replace("亚","亞").strip()
                             matched_br = clean_br if clean_br in BROKER_MAP else next((k for k in BROKER_MAP if clean_br in k or k in clean_br), None)
                             if matched_br:
                                 st.session_state.t4_target_br = matched_br
                                 
                             st.session_state.auto_draw = True
-                            st.session_state.table_refresh_key += 1 # 重置勾選
+                            st.session_state.table_refresh_key += 1 
                             st.rerun()
 
         st.subheader("🔴 吃貨主力分點")
@@ -466,7 +570,7 @@ with tab3:
     with c2:
         loc_branches = GEO_MAP[sel_loc]
         sorted_loc_br_keys = sorted(loc_branches.keys())
-        sel_t3_br_l = st.selectbox("選擇該區特定分點", sorted_loc_br_keys, key="t3_br_sel")
+        sel_t3_br_l = st.selectbox("選擇該區特定分點", sorted_loc_br_keys, key=f"t3_br_sel_{sel_loc}")
         sel_t3_br_info = loc_branches[sel_t3_br_l]
         sel_t3_hq_id = sel_t3_br_info['hq_id']
         sel_t3_br_id = sel_t3_br_info['br_id']
@@ -554,7 +658,6 @@ with tab3:
                     "extracted_stock_id": None 
                 }
                 
-                # ✅ 加入動態 Refresh Key
                 editor_key = f"editor_{key_prefix}_{st.session_state.table_refresh_key}"
                 edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=editor_key)
                 
@@ -566,7 +669,7 @@ with tab3:
                             st.session_state.t4_target_sid = sid_clicked
                             st.session_state.t4_target_br = sel_t3_br_l
                             st.session_state.auto_draw = True
-                            st.session_state.table_refresh_key += 1 # 瞬間重置取消打勾
+                            st.session_state.table_refresh_key += 1 
                             st.rerun()
 
         sd_s, ed_s = t3_sd.strftime('%Y-%m-%d'), t3_ed.strftime('%Y-%m-%d')
@@ -577,7 +680,7 @@ with tab3:
         st.markdown(f"### 🟢 該分點倒貨中 (極端賣出) - 共 {len(st.session_state.t3_sell_df)} 檔")
         display_table_with_button_t3(st.session_state.t3_sell_df.sort_values(by=col_sell, ascending=False).head(999 if show_full_t3 else 10), "t3_sell")
 
-# --- Tab 4 (修復擠成一團、畫線失效的超穩版) ---
+# --- Tab 4 (專業繪圖) ---
 with tab4:
     if st.session_state.auto_draw:
         st.success("✅ 參數已帶入！請直接查看下方圖表。")
@@ -585,11 +688,13 @@ with tab4:
     col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns([1, 1.5, 1, 1, 1])
     
     with col_t1:
-        # ✅ 使用目標狀態驅動 UI 顯示數值
-        t4_sid_clean = st.text_input("股票代號", key="t4_target_sid").strip().upper()
+        t4_sid_val = st.session_state.get('t4_target_sid', "6488")
+        t4_sid = st.text_input("股票代號", value=t4_sid_val, key="t4_sid_ui_real")
     with col_t2:
         all_br_names = sorted(list(BROKER_MAP.keys()))
-        t4_br_name = st.selectbox("搜尋分點", all_br_names, key="t4_target_br")
+        t4_br_val = st.session_state.get('t4_target_br', "兆豐-忠孝")
+        idx = all_br_names.index(t4_br_val) if t4_br_val in all_br_names else 0
+        t4_br_name = st.selectbox("搜尋分點", all_br_names, index=idx, key="t4_br_ui_real")
     with col_t3: 
         t4_period = st.radio("週期", ["日", "週", "月"], horizontal=True)
     with col_t4: 
@@ -608,20 +713,28 @@ with tab4:
         if st.button("➕ 加入畫線", use_container_width=True):
             if hline_val > 0 and hline_val not in st.session_state.custom_hlines:
                 st.session_state.custom_hlines.append(hline_val)
+            st.session_state.t4_target_sid = t4_sid
+            st.session_state.t4_target_br = t4_br_name
             st.session_state.auto_draw = True
             st.rerun()
     with col_x3:
         st.write("")
         if st.button("🗑️ 清除所有畫線", use_container_width=True):
             st.session_state.custom_hlines = []
+            st.session_state.t4_target_sid = t4_sid
+            st.session_state.t4_target_br = t4_br_name
             st.session_state.auto_draw = True
             st.rerun()
     
+    t4_sid_clean = t4_sid.strip().upper()
+
+    # 🌟 GSheets: 新增清單
     if fav_btn:
         entry = {"股票代號": t4_sid_clean, "追蹤分點": t4_br_name}
         if entry not in st.session_state.watchlist:
             st.session_state.watchlist.append(entry)
-            st.success(f"✅ 已加入暫存清單！")
+            save_gsheet_watchlist(current_user, st.session_state.watchlist) # 寫入雲端
+            st.success(f"✅ 已加入【{current_user}】的專屬暫存清單！")
         else:
             st.warning("⚠️ 已在清單中。")
 
@@ -646,7 +759,7 @@ with tab4:
             with c_m23: macd2_sig = st.number_input("訊號", value=18, key="m2sig")
 
     if st.session_state.watchlist:
-        with st.expander("⭐ 暫存主力清單", expanded=True):
+        with st.expander(f"⭐ 【{current_user}】的專屬主力清單", expanded=True):
             wl_df = pd.DataFrame(st.session_state.watchlist)
             wl_df.insert(0, '載入', False)
             wl_df['刪除'] = False
@@ -658,15 +771,21 @@ with tab4:
                 st.session_state.t4_target_br = edited_wl[edited_wl['載入'] == True].iloc[0]['追蹤分點']
                 st.session_state.auto_draw = True
                 st.rerun()
+            # 🌟 GSheets: 刪除清單
             if not edited_wl[edited_wl['刪除'] == True].empty:
                 del_sid = edited_wl[edited_wl['刪除'] == True].iloc[0]['股票代號']
                 del_br = edited_wl[edited_wl['刪除'] == True].iloc[0]['追蹤分點']
                 st.session_state.watchlist = [item for item in st.session_state.watchlist if not (item['股票代號'] == del_sid and item['追蹤分點'] == del_br)]
+                save_gsheet_watchlist(current_user, st.session_state.watchlist) # 覆寫雲端
                 st.rerun()
 
     # 執行繪圖
     if draw_btn or st.session_state.auto_draw:
         st.session_state.auto_draw = False 
+        
+        # 同步回寫 UI 狀態
+        st.session_state.t4_target_sid = t4_sid
+        st.session_state.t4_target_br = t4_br_name
         
         t4_br_id = BROKER_MAP[t4_br_name]['br_id']
         
@@ -797,7 +916,6 @@ with tab4:
                             
                             const chart = LightweightCharts.createChart(document.getElementById('chart'), layoutOptions);
                             
-                            // 🔑 圖表分層：切成互不重疊的四個區塊！
                             chart.priceScale('right').applyOptions({{
                                 scaleMargins: {{ top: 0.02, bottom: 0.45 }}
                             }});
@@ -837,7 +955,7 @@ with tab4:
                             seriesS2.setData(rawData.filter(d => d.s2 !== undefined).map(d => ({{time: d.time, value: d.s2}})));
                             chart.priceScale('m2').applyOptions({{ scaleMargins: {{ top: 0.85, bottom: 0.0 }}, visible: false }});
 
-                            // 🔑 水平線：利用原生的 createPriceLine 保證顯示
+                            // 水平線
                             hlines.forEach(val => {{
                                 seriesK.createPriceLine({{
                                     price: val, color: '#2962FF', lineWidth: 2, lineStyle: 2, 
@@ -879,7 +997,6 @@ with tab4:
                                 legend.innerHTML = html;
                             }});
 
-                            // 🔑 解決擠成一團：加入 ResizeObserver 自動適應隱藏 Tab 的寬度變化！
                             new ResizeObserver(() => {{
                                 chart.applyOptions({{
                                     width: document.getElementById('wrapper').clientWidth, 
@@ -888,7 +1005,6 @@ with tab4:
                                 chart.timeScale().fitContent();
                             }}).observe(document.getElementById('wrapper'));
                             
-                            // 初始化延遲刷新確保大小正確
                             setTimeout(() => {{ chart.timeScale().fitContent(); }}, 100);
                         </script>
                     </body>
