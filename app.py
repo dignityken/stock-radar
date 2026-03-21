@@ -26,13 +26,12 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 st.set_page_config(page_title="籌碼雷達", layout="wide")
 
 # ==========================================
-# 🔒 進入門檻：通行密碼與免登書籤系統 (修正網址洩漏)
+# 🔒 進入門檻：通行密碼與免登書籤系統
 # ==========================================
 def check_password():
     valid_passwords = st.secrets.get("passwords", {"測試帳號": "0000|2099-12-31"})
     query_params = st.query_params
     
-    # 透過網址 Token 登入
     if "token" in query_params:
         url_token = query_params["token"]
         for user, auth_string in valid_passwords.items():
@@ -43,16 +42,15 @@ def check_password():
                         st.session_state["password_correct"] = True
                         st.session_state["username"] = user
                         st.session_state["user_token"] = url_token
-                        st.query_params.clear()  # 🌟 瞬間清除網址參數，防止分享外流！
+                        st.query_params.clear()
                         return True
                 except:
                     st.session_state["password_correct"] = True
                     st.session_state["username"] = user
                     st.session_state["user_token"] = url_token
-                    st.query_params.clear()  # 🌟 瞬間清除網址參數
+                    st.query_params.clear()
                     return True
 
-    # 手動輸入密碼登入
     def password_entered():
         user_pwd_input = st.session_state["pwd_input"].strip()
         match_found = False
@@ -75,7 +73,7 @@ def check_password():
             st.session_state["password_correct"] = True
             st.session_state["username"] = matched_user
             st.session_state["user_token"] = user_pwd_input
-            st.query_params.clear()  # 確保網址列乾淨
+            st.query_params.clear()
             del st.session_state["pwd_input"]  
         elif match_found and is_expired:
             st.session_state["password_correct"] = "expired"
@@ -99,32 +97,41 @@ def check_password():
 if not check_password(): st.stop()  
 
 # ==========================================
-# 🆕 Google Sheets 雲端資料庫互動函數
+# 🆕 Google Sheets 雲端資料庫互動函數 (強化防呆與錯誤顯示)
 # ==========================================
 @st.cache_resource(ttl=3600)
 def init_gsheets():
-    if not GSHEETS_AVAILABLE or "gcp_service_account" not in st.secrets or "gsheets" not in st.secrets:
-        return None
+    if not GSHEETS_AVAILABLE:
+        return None, "伺服器未安裝 gspread 套件"
+    if "gcp_service_account" not in st.secrets:
+        return None, "找不到 [gcp_service_account] 金鑰設定"
+    if "gsheets" not in st.secrets or "spreadsheet_url" not in st.secrets["gsheets"]:
+        return None, "找不到 [gsheets] 試算表網址設定"
+    
     try:
         scopes = ['https://www.googleapis.com/auth/spreadsheets']
         creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
         client = gspread.authorize(creds)
-        sheet_url = st.secrets["gsheets"]["spreadsheet_url"]
-        doc = client.open_by_url(sheet_url)
+        # 移除網址後方的 ?gid=0 參數，避免 gspread 解析錯誤
+        raw_url = st.secrets["gsheets"]["spreadsheet_url"]
+        clean_url = raw_url.split("?")[0]
+        doc = client.open_by_url(clean_url)
+        
         try:
             ws = doc.worksheet("Watchlist")
         except gspread.exceptions.WorksheetNotFound:
             ws = doc.add_worksheet(title="Watchlist", rows="1000", cols="2")
             ws.update_acell('A1', 'Username')
             ws.update_acell('B1', 'WatchlistJSON')
-        return ws
+        return ws, "OK"
     except Exception as e:
-        print(f"GSheets 連線錯誤: {e}")
-        return None
+        return None, f"GSheets 連線失敗: {str(e)}"
 
 def load_gsheet_watchlist(username):
-    ws = init_gsheets()
-    if not ws: return []
+    ws, msg = init_gsheets()
+    if not ws: 
+        print(f"GSheets 載入失敗: {msg}")
+        return []
     try:
         cell = ws.find(username, in_column=1)
         if cell:
@@ -133,13 +140,14 @@ def load_gsheet_watchlist(username):
                 return json.loads(data)
     except gspread.exceptions.CellNotFound:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"GSheets 讀取錯誤: {e}")
     return []
 
 def save_gsheet_watchlist(username, wl_list):
-    ws = init_gsheets()
-    if not ws: return
+    ws, msg = init_gsheets()
+    if not ws: 
+        return False, msg
     try:
         data_str = json.dumps(wl_list, ensure_ascii=False)
         try:
@@ -147,8 +155,9 @@ def save_gsheet_watchlist(username, wl_list):
             ws.update_cell(cell.row, 2, data_str)
         except gspread.exceptions.CellNotFound:
             ws.append_row([username, data_str])
+        return True, "成功寫入雲端"
     except Exception as e:
-        print(f"GSheets 儲存錯誤: {e}")
+        return False, f"寫入錯誤: {str(e)}"
 
 # ==========================================
 # 側邊欄：顯示登入者與專屬書籤連結
@@ -175,31 +184,16 @@ for tab in ['t1', 't2', 't3']:
 
 if 't4_target_sid' not in st.session_state: st.session_state.t4_target_sid = "6488"
 if 't4_target_br' not in st.session_state: st.session_state.t4_target_br = "兆豐-忠孝"
+if 't4_sid_ui_real' not in st.session_state: st.session_state.t4_sid_ui_real = "6488"
+if 't4_br_ui_real' not in st.session_state: st.session_state.t4_br_ui_real = "兆豐-忠孝"
+
 if 'auto_draw' not in st.session_state: st.session_state.auto_draw = False
 if 'custom_hlines' not in st.session_state: st.session_state.custom_hlines = []
 if 'table_refresh_key' not in st.session_state: st.session_state.table_refresh_key = 0
 
-# 🌟 從 Google Sheets 載入該會員專屬的 Watchlist (每次開啟網頁只載入一次)
 if 'watchlist_loaded' not in st.session_state:
     st.session_state.watchlist = load_gsheet_watchlist(current_user)
     st.session_state.watchlist_loaded = True
-
-def send_to_tab4(sid, br_name):
-    st.session_state.t4_target_sid = str(sid).strip().upper()
-    clean_br = str(br_name).replace("亚","亞").strip()
-    matched_br = None
-    if clean_br in BROKER_MAP:
-        matched_br = clean_br
-    else:
-        for k in BROKER_MAP.keys():
-            if clean_br in k or k in clean_br:
-                matched_br = k
-                break
-    if matched_br:
-        st.session_state.t4_target_br = matched_br
-        
-    st.session_state.auto_draw = True
-    st.rerun()
 
 # ==========================================
 # 資料載入與處理函數
@@ -231,14 +225,9 @@ def load_branch_data(url):
     if not content: return ""
     return content.strip().lstrip("'").rstrip("'")
 
-# ==========================================
-# 🌟 補回遺失的全域變數與 Google Drive 連結 🌟
-# ==========================================
 GOOGLE_DRIVE_HQ_DATA_URL = "https://drive.google.com/file/d/112sWHyGbfuNyOEN2M85wIhWtHj1MqKj5/view?usp=drive_link"
 GOOGLE_DRIVE_BRANCH_DATA_URL = "https://drive.google.com/file/d/1C6axJwaHq3SFRslODK8m28WRYFDd90x_/view?usp=drive_link"
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-}
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
 
 HQ_DATA = load_hq_data(GOOGLE_DRIVE_HQ_DATA_URL)
 FINAL_RAW_DATA_CLEANED = load_branch_data(GOOGLE_DRIVE_BRANCH_DATA_URL)
@@ -460,7 +449,9 @@ with tab1:
                         if changes.get('送至 Tab4 繪圖', False) == True:
                             sid_clicked = df_show.iloc[row_idx]['extracted_stock_id']
                             st.session_state.t4_target_sid = sid_clicked
+                            st.session_state['t4_sid_ui_real'] = sid_clicked # 🌟 強制覆寫 UI
                             st.session_state.t4_target_br = sel_br_l
+                            st.session_state['t4_br_ui_real'] = sel_br_l     # 🌟 強制覆寫 UI
                             st.session_state.auto_draw = True
                             st.session_state.table_refresh_key += 1
                             st.rerun()
@@ -553,10 +544,13 @@ with tab2:
                         if changes.get('送至 Tab4 繪圖', False) == True:
                             br_clicked = df_show.iloc[row_idx]['券商']
                             st.session_state.t4_target_sid = t2_sid_clean
+                            st.session_state['t4_sid_ui_real'] = t2_sid_clean # 🌟 強制覆寫 UI
+                            
                             clean_br = br_clicked.replace("亚","亞").strip()
                             matched_br = clean_br if clean_br in BROKER_MAP else next((k for k in BROKER_MAP if clean_br in k or k in clean_br), None)
                             if matched_br:
                                 st.session_state.t4_target_br = matched_br
+                                st.session_state['t4_br_ui_real'] = matched_br # 🌟 強制覆寫 UI
                                 
                             st.session_state.auto_draw = True
                             st.session_state.table_refresh_key += 1 
@@ -676,7 +670,9 @@ with tab3:
                         if changes.get('帶入K線', False) == True:
                             sid_clicked = df_show.iloc[row_idx]['extracted_stock_id']
                             st.session_state.t4_target_sid = sid_clicked
+                            st.session_state['t4_sid_ui_real'] = sid_clicked # 🌟 強制覆寫 UI
                             st.session_state.t4_target_br = sel_t3_br_l
+                            st.session_state['t4_br_ui_real'] = sel_t3_br_l  # 🌟 強制覆寫 UI
                             st.session_state.auto_draw = True
                             st.session_state.table_refresh_key += 1 
                             st.rerun()
@@ -697,13 +693,11 @@ with tab4:
     col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns([1, 1.5, 1, 1, 1])
     
     with col_t1:
-        t4_sid_val = st.session_state.get('t4_target_sid', "6488")
-        t4_sid = st.text_input("股票代號", value=t4_sid_val, key="t4_sid_ui_real")
+        # 🌟 改為直接綁定 session state 中的 t4_sid_ui_real 確保完全同步
+        t4_sid = st.text_input("股票代號", key="t4_sid_ui_real")
     with col_t2:
         all_br_names = sorted(list(BROKER_MAP.keys()))
-        t4_br_val = st.session_state.get('t4_target_br', "兆豐-忠孝")
-        idx = all_br_names.index(t4_br_val) if t4_br_val in all_br_names else 0
-        t4_br_name = st.selectbox("搜尋分點", all_br_names, index=idx, key="t4_br_ui_real")
+        t4_br_name = st.selectbox("搜尋分點", all_br_names, key="t4_br_ui_real")
     with col_t3: 
         t4_period = st.radio("週期", ["日", "週", "月"], horizontal=True)
     with col_t4: 
@@ -737,15 +731,20 @@ with tab4:
     
     t4_sid_clean = t4_sid.strip().upper()
 
-    # 🌟 GSheets: 新增清單
+    # 🌟 GSheets: 新增清單 (加入錯誤防呆回報)
     if fav_btn:
         entry = {"股票代號": t4_sid_clean, "追蹤分點": t4_br_name}
         if entry not in st.session_state.watchlist:
             st.session_state.watchlist.append(entry)
-            save_gsheet_watchlist(current_user, st.session_state.watchlist) # 寫入雲端
-            st.success(f"✅ 已加入【{current_user}】的專屬暫存清單！")
+            
+            # 寫入雲端並接收狀態
+            success, msg = save_gsheet_watchlist(current_user, st.session_state.watchlist)
+            if success:
+                st.success(f"✅ 已存入【{current_user}】專屬雲端清單！")
+            else:
+                st.warning(f"⚠️ 雲端同步失敗！(錯誤原因: {msg})，目前僅存於本次暫存區。")
         else:
-            st.warning("⚠️ 已在清單中。")
+            st.warning("⚠️ 此組合已在清單中。")
 
     with st.expander("⚙️ 進階指標參數設定", expanded=False):
         sc1, sc2, sc3 = st.columns(3)
@@ -776,16 +775,26 @@ with tab4:
             edited_wl = st.data_editor(wl_df, hide_index=True, column_config=wl_config, use_container_width=True, key="wl_editor")
             
             if not edited_wl[edited_wl['載入'] == True].empty:
-                st.session_state.t4_target_sid = edited_wl[edited_wl['載入'] == True].iloc[0]['股票代號']
-                st.session_state.t4_target_br = edited_wl[edited_wl['載入'] == True].iloc[0]['追蹤分點']
+                load_sid = edited_wl[edited_wl['載入'] == True].iloc[0]['股票代號']
+                load_br = edited_wl[edited_wl['載入'] == True].iloc[0]['追蹤分點']
+                
+                st.session_state.t4_target_sid = load_sid
+                st.session_state['t4_sid_ui_real'] = load_sid
+                st.session_state.t4_target_br = load_br
+                st.session_state['t4_br_ui_real'] = load_br
                 st.session_state.auto_draw = True
                 st.rerun()
+                
             # 🌟 GSheets: 刪除清單
             if not edited_wl[edited_wl['刪除'] == True].empty:
                 del_sid = edited_wl[edited_wl['刪除'] == True].iloc[0]['股票代號']
                 del_br = edited_wl[edited_wl['刪除'] == True].iloc[0]['追蹤分點']
                 st.session_state.watchlist = [item for item in st.session_state.watchlist if not (item['股票代號'] == del_sid and item['追蹤分點'] == del_br)]
-                save_gsheet_watchlist(current_user, st.session_state.watchlist) # 覆寫雲端
+                
+                # 同步刪除雲端
+                success, msg = save_gsheet_watchlist(current_user, st.session_state.watchlist)
+                if not success:
+                    st.error(f"雲端刪除同步失敗: {msg}")
                 st.rerun()
 
     # 執行繪圖
