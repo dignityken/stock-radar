@@ -24,6 +24,14 @@ except ImportError:
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="籌碼雷達", layout="wide")
+# 隱藏 Streamlit 預設的右上角選單與底部浮水印
+hide_streamlit_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            </style>
+            """
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 # ==========================================
 # 🔒 進入門檻：通行密碼與免登書籤系統
