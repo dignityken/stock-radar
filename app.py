@@ -84,13 +84,14 @@ for tab in ['t1', 't2', 't3']:
     if f'{tab}_buy_df' not in st.session_state: st.session_state[f'{tab}_buy_df'] = pd.DataFrame()
     if f'{tab}_sell_df' not in st.session_state: st.session_state[f'{tab}_sell_df'] = pd.DataFrame()
 
-if 't4_sid_input' not in st.session_state: st.session_state.t4_sid_input = "6488"
-if 't4_br_input' not in st.session_state: st.session_state.t4_br_input = "兆豐-忠孝"
+# ✅ 強制綁定唯一 Key，確保傳送資料不會錯亂
+if 't4_target_sid' not in st.session_state: st.session_state.t4_target_sid = "6488"
+if 't4_target_br' not in st.session_state: st.session_state.t4_target_br = "兆豐-忠孝"
 if 'auto_draw' not in st.session_state: st.session_state.auto_draw = False
 if 'watchlist' not in st.session_state: st.session_state.watchlist = []
 if 'custom_hlines' not in st.session_state: st.session_state.custom_hlines = []
-if 'jump_sid' not in st.session_state: st.session_state.jump_sid = None
-if 'jump_br_name' not in st.session_state: st.session_state.jump_br_name = None
+# ✅ 加入表格重置計數器 (解決打勾留存衝突問題)
+if 'table_refresh_key' not in st.session_state: st.session_state.table_refresh_key = 0
 
 # ==========================================
 # 資料載入與處理函數
@@ -240,7 +241,7 @@ def safe_float(val):
     return float(val)
 
 # ==========================================
-# UI 介面設定
+# 1. UI 介面設定
 # ==========================================
 tab1, tab2, tab3, tab4 = st.tabs(["🚀 特定分點", "📊 股票代號", "📍 地緣券商", "📊 主力 K 線圖"])
 
@@ -333,16 +334,21 @@ with tab1:
                     "extracted_stock_id": None 
                 }
                 
-                editor_key = f"editor_{key_prefix}"
+                # ✅ 加入動態 Refresh Key 解決多選衝突 UX 問題
+                editor_key = f"editor_{key_prefix}_{st.session_state.table_refresh_key}"
                 edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=editor_key)
                 
-                clicked_rows = edited_df[edited_df['送至 Tab4 繪圖'] == True]
-                if not clicked_rows.empty:
-                    sid_clicked = clicked_rows.iloc[0]['extracted_stock_id']
-                    st.session_state.jump_sid = sid_clicked
-                    st.session_state.jump_br_name = sel_br_l
-                    st.session_state.auto_draw = True
-                    st.success(f"✅ 已將 {sid_clicked} 與 {sel_br_l} 參數送到 Tab4！請手動切換至「📊 主力 K 線圖」。")
+                # 攔截打勾事件並發送
+                if editor_key in st.session_state:
+                    edits = st.session_state[editor_key].get('edited_rows', {})
+                    for row_idx, changes in edits.items():
+                        if changes.get('送至 Tab4 繪圖', False) == True:
+                            sid_clicked = df_show.iloc[row_idx]['extracted_stock_id']
+                            st.session_state.t4_target_sid = sid_clicked
+                            st.session_state.t4_target_br = sel_br_l
+                            st.session_state.auto_draw = True
+                            st.session_state.table_refresh_key += 1 # 強制重置表格取消打勾
+                            st.rerun()
 
         col_b = '買進金額' if '金額' in t1_u else '買進張數'
         col_s = '賣出金額' if '金額' in t1_u else '賣出張數'
@@ -351,7 +357,7 @@ with tab1:
         st.markdown(f"### 🟢 大戶倒貨中 - 共 {len(st.session_state.t1_sell_df)} 檔")
         display_table_with_button(st.session_state.t1_sell_df.sort_values(by=col_s, ascending=False).head(999 if show_full else 10), "t1_sell")
 
-# --- Tab 2 (使用您提供的完美解析代碼) ---
+# --- Tab 2 ---
 with tab2:
     st.markdown("### 📈 誰在買賣這檔股票？")
     c1, c2, c3 = st.columns(3)
@@ -377,12 +383,11 @@ with tab2:
                 tables = pd.read_html(StringIO(res.text))
                 df_all = pd.DataFrame()
                 
-                # 完全遵照您的正常版解析法
                 for tb in tables:
                     if tb.shape[1] == 10:
                         l = tb.iloc[:,[0,1,2]].copy(); l.columns=['券商','買','賣']
                         r = tb.iloc[:,[5,6,7]].copy(); r.columns=['券商','買','賣']
-                        df_all = pd.concat([l, r])
+                        df_all = pd.concat([df_all, l, r], ignore_index=True)
                 
                 if not df_all.empty:
                     df_all = df_all.dropna()
@@ -423,21 +428,33 @@ with tab2:
                     "網頁明細": st.column_config.LinkColumn("網頁明細", display_text="🏦", help="外連富邦明細"),
                     "送至 Tab4 繪圖": st.column_config.CheckboxColumn("送至 Tab4 繪圖", help="打勾後請手動切換至分頁四")
                 }
-                edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=f"editor_{key_prefix}")
-                clicked_rows = edited_df[edited_df['送至 Tab4 繪圖'] == True]
-                if not clicked_rows.empty:
-                    br_clicked = clicked_rows.iloc[0]['券商']
-                    st.session_state.jump_sid = t2_sid_clean
-                    st.session_state.jump_br_name = br_clicked
-                    st.session_state.auto_draw = True
-                    st.success(f"✅ 已將 {t2_sid_clean} 與 {br_clicked} 參數送到 Tab4！請在最上方手動點擊「📊 主力 K 線圖」分頁。")
+                
+                # ✅ 加入動態 Refresh Key
+                editor_key = f"editor_{key_prefix}_{st.session_state.table_refresh_key}"
+                edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=editor_key)
+                
+                if editor_key in st.session_state:
+                    edits = st.session_state[editor_key].get('edited_rows', {})
+                    for row_idx, changes in edits.items():
+                        if changes.get('送至 Tab4 繪圖', False) == True:
+                            br_clicked = df_show.iloc[row_idx]['券商']
+                            st.session_state.t4_target_sid = t2_sid_clean
+                            # 模糊匹配並賦值給 Tab 4
+                            clean_br = br_clicked.replace("亚","亞").strip()
+                            matched_br = clean_br if clean_br in BROKER_MAP else next((k for k in BROKER_MAP if clean_br in k or k in clean_br), None)
+                            if matched_br:
+                                st.session_state.t4_target_br = matched_br
+                                
+                            st.session_state.auto_draw = True
+                            st.session_state.table_refresh_key += 1 # 重置勾選
+                            st.rerun()
 
         st.subheader("🔴 吃貨主力分點")
         display_table_with_button_t2(st.session_state.t2_buy_df.sort_values('買', ascending=False).head(999 if show_full_t2 else 10), "t2_buy")
         st.subheader("🟢 倒貨主力分點")
         display_table_with_button_t2(st.session_state.t2_sell_df.sort_values('賣', ascending=False).head(999 if show_full_t2 else 10), "t2_sell")
 
-# --- Tab 3 (使用您提供的完美解析代碼) ---
+# --- Tab 3 ---
 with tab3:
     st.markdown("### 📍 尋找地緣/同名分點進出")
     st.caption("透過分點名稱後綴（例如：城中、三重、信義）跨券商尋找特定地區的買賣神人。")
@@ -484,8 +501,6 @@ with tab3:
                     return f"{stock_id}{stock_name}"
                 return ""
             processed_html_text = re.sub(r"<script[^>]*>(?:(?!</script>).)*GenLink2stk\s*\([^)]+\).*?</script>", extract_stock_name_from_script, html_text, flags=re.IGNORECASE | re.DOTALL)
-            
-            # 完全遵照您的正常版解析法
             tables = pd.read_html(StringIO(processed_html_text))
             df_all = pd.DataFrame()
             for tb in tables:
@@ -510,7 +525,6 @@ with tab3:
                 df_all = df_all[df_all['總額'] > 0].copy()
                 df_all['買%'] = (df_all[col_buy] / df_all['總額'] * 100).round(1)
                 df_all['賣%'] = (df_all[col_sell] / df_all['總額'] * 100).round(1)
-                
                 if '嚴格' in t3_mode:
                     st.session_state.t3_buy_df = df_all[(df_all[col_buy] > 0) & (df_all[col_sell] == 0)].copy()
                     st.session_state.t3_sell_df = df_all[(df_all[col_sell] > 0) & (df_all[col_buy] == 0)].copy()
@@ -539,14 +553,21 @@ with tab3:
                     "帶入K線": st.column_config.CheckboxColumn("送至 Tab4 繪圖"),
                     "extracted_stock_id": None 
                 }
-                edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=f"editor_{key_prefix}")
-                clicked_rows = edited_df[edited_df['帶入K線'] == True]
-                if not clicked_rows.empty:
-                    sid_clicked = clicked_rows.iloc[0]['extracted_stock_id']
-                    st.session_state.jump_sid = sid_clicked
-                    st.session_state.jump_br_name = sel_t3_br_l
-                    st.session_state.auto_draw = True
-                    st.success(f"✅ 已將 {sid_clicked} 與 {sel_t3_br_l} 參數送到 Tab4！請手動切換至「📊 主力 K 線圖」。")
+                
+                # ✅ 加入動態 Refresh Key
+                editor_key = f"editor_{key_prefix}_{st.session_state.table_refresh_key}"
+                edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=editor_key)
+                
+                if editor_key in st.session_state:
+                    edits = st.session_state[editor_key].get('edited_rows', {})
+                    for row_idx, changes in edits.items():
+                        if changes.get('帶入K線', False) == True:
+                            sid_clicked = df_show.iloc[row_idx]['extracted_stock_id']
+                            st.session_state.t4_target_sid = sid_clicked
+                            st.session_state.t4_target_br = sel_t3_br_l
+                            st.session_state.auto_draw = True
+                            st.session_state.table_refresh_key += 1 # 瞬間重置取消打勾
+                            st.rerun()
 
         sd_s, ed_s = t3_sd.strftime('%Y-%m-%d'), t3_ed.strftime('%Y-%m-%d')
         st.subheader(f"🕵️ 地緣雷達結果：{sel_t3_br_l}")
@@ -556,35 +577,19 @@ with tab3:
         st.markdown(f"### 🟢 該分點倒貨中 (極端賣出) - 共 {len(st.session_state.t3_sell_df)} 檔")
         display_table_with_button_t3(st.session_state.t3_sell_df.sort_values(by=col_sell, ascending=False).head(999 if show_full_t3 else 10), "t3_sell")
 
-# --- Tab 4 (解決重疊與畫線問題的完美版) ---
+# --- Tab 4 (修復擠成一團、畫線失效的超穩版) ---
 with tab4:
-    # 接收來自其他 Tab 的跳轉指令
-    if st.session_state.get('jump_sid'):
-        st.session_state.t4_sid_input = st.session_state.jump_sid
-        matched_br = st.session_state.jump_br_name.replace("亚","亞").strip()
-        if matched_br in BROKER_MAP:
-            st.session_state.t4_br_input = matched_br
-        else:
-            for k in BROKER_MAP.keys():
-                if matched_br in k or k in matched_br:
-                    st.session_state.t4_br_input = k
-                    break
-        st.session_state.jump_sid = None
-        st.session_state.jump_br_name = None
-
     if st.session_state.auto_draw:
         st.success("✅ 參數已帶入！請直接查看下方圖表。")
         
     col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns([1, 1.5, 1, 1, 1])
     
     with col_t1:
-        t4_sid_val = st.session_state.get('t4_sid_input', "6488")
-        t4_sid = st.text_input("股票代號", value=t4_sid_val, key="t4_sid_ui_real")
+        # ✅ 使用目標狀態驅動 UI 顯示數值
+        t4_sid_clean = st.text_input("股票代號", key="t4_target_sid").strip().upper()
     with col_t2:
         all_br_names = sorted(list(BROKER_MAP.keys()))
-        t4_br_val = st.session_state.get('t4_br_input', "兆豐-忠孝")
-        idx = all_br_names.index(t4_br_val) if t4_br_val in all_br_names else 0
-        t4_br_name = st.selectbox("搜尋分點", all_br_names, index=idx, key="t4_br_ui_real")
+        t4_br_name = st.selectbox("搜尋分點", all_br_names, key="t4_target_br")
     with col_t3: 
         t4_period = st.radio("週期", ["日", "週", "月"], horizontal=True)
     with col_t4: 
@@ -597,11 +602,9 @@ with tab4:
     with col_x1:
         fav_btn = st.button("❤️ 存入清單", use_container_width=True)
     with col_x2_1:
-        # ✅ 水平線獨立輸入框
         hline_val = st.number_input("📏 水平線價格", value=0.0, step=1.0, key="hline_val_input")
     with col_x2_2:
         st.write("")
-        # ✅ 按下實體按鈕 100% 觸發畫線
         if st.button("➕ 加入畫線", use_container_width=True):
             if hline_val > 0 and hline_val not in st.session_state.custom_hlines:
                 st.session_state.custom_hlines.append(hline_val)
@@ -613,8 +616,6 @@ with tab4:
             st.session_state.custom_hlines = []
             st.session_state.auto_draw = True
             st.rerun()
-
-    t4_sid_clean = t4_sid.strip().upper()
     
     if fav_btn:
         entry = {"股票代號": t4_sid_clean, "追蹤分點": t4_br_name}
@@ -653,8 +654,8 @@ with tab4:
             edited_wl = st.data_editor(wl_df, hide_index=True, column_config=wl_config, use_container_width=True, key="wl_editor")
             
             if not edited_wl[edited_wl['載入'] == True].empty:
-                st.session_state.t4_sid_input = edited_wl[edited_wl['載入'] == True].iloc[0]['股票代號']
-                st.session_state.t4_br_input = edited_wl[edited_wl['載入'] == True].iloc[0]['追蹤分點']
+                st.session_state.t4_target_sid = edited_wl[edited_wl['載入'] == True].iloc[0]['股票代號']
+                st.session_state.t4_target_br = edited_wl[edited_wl['載入'] == True].iloc[0]['追蹤分點']
                 st.session_state.auto_draw = True
                 st.rerun()
             if not edited_wl[edited_wl['刪除'] == True].empty:
@@ -666,10 +667,6 @@ with tab4:
     # 執行繪圖
     if draw_btn or st.session_state.auto_draw:
         st.session_state.auto_draw = False 
-        
-        # 同步回寫 UI
-        st.session_state.t4_sid_input = t4_sid
-        st.session_state.t4_br_input = t4_br_name
         
         t4_br_id = BROKER_MAP[t4_br_name]['br_id']
         
@@ -740,7 +737,6 @@ with tab4:
 
                     hlines_js_array = json.dumps(st.session_state.custom_hlines)
 
-                    # ✅ 完美解決圖表重疊問題 (Scale Margins) 與畫線必現問題 (LineSeries)
                     html_code = f"""
                     <!DOCTYPE html>
                     <html>
@@ -801,8 +797,7 @@ with tab4:
                             
                             const chart = LightweightCharts.createChart(document.getElementById('chart'), layoutOptions);
                             
-                            // 🔑 關鍵佈局修正：將圖表切成互不重疊的四個區塊！
-                            // 1. K線主圖區塊 (佔畫面上半部)
+                            // 🔑 圖表分層：切成互不重疊的四個區塊！
                             chart.priceScale('right').applyOptions({{
                                 scaleMargins: {{ top: 0.02, bottom: 0.45 }}
                             }});
@@ -819,44 +814,35 @@ with tab4:
                             const bbDn = chart.addLineSeries({{ color: 'rgba(255, 255, 255, 0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             bbDn.setData(rawData.filter(d => d.bbd !== undefined).map(d => ({{time: d.time, value: d.bbd}})));
                             
-                            // 2. 買賣超區塊 (專屬獨立座標)
+                            // 買賣超 (獨立座標)
                             const seriesVol = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'vol', lastValueVisible: false, priceLineVisible: false }});
                             seriesVol.setData(rawData.map(d => ({{time: d.time, value: d.vol, color: d.vol >= 0 ? 'rgba(239, 83, 80, 0.8)' : 'rgba(38, 166, 154, 0.8)'}})));
-                            chart.priceScale('vol').applyOptions({{
-                                scaleMargins: {{ top: 0.58, bottom: 0.28 }},
-                                visible: false
-                            }});
+                            chart.priceScale('vol').applyOptions({{ scaleMargins: {{ top: 0.58, bottom: 0.28 }}, visible: false }});
                             
-                            // 3. MACD 短線區塊
+                            // MACD 短線
                             const seriesH1 = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'm1', lastValueVisible: false, priceLineVisible: false }});
                             seriesH1.setData(rawData.filter(d => d.h1 !== undefined).map(d => ({{time: d.time, value: d.h1, color: d.h1 >= 0 ? 'rgba(239, 83, 80, 0.5)' : 'rgba(38, 166, 154, 0.5)'}})));
                             const seriesM1 = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, priceScaleId: 'm1', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             seriesM1.setData(rawData.filter(d => d.m1 !== undefined).map(d => ({{time: d.time, value: d.m1}})));
                             const seriesS1 = chart.addLineSeries({{ color: '#00E676', lineWidth: 1, priceScaleId: 'm1', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             seriesS1.setData(rawData.filter(d => d.s1 !== undefined).map(d => ({{time: d.time, value: d.s1}})));
-                            chart.priceScale('m1').applyOptions({{
-                                scaleMargins: {{ top: 0.72, bottom: 0.15 }},
-                                visible: false
-                            }});
+                            chart.priceScale('m1').applyOptions({{ scaleMargins: {{ top: 0.72, bottom: 0.15 }}, visible: false }});
 
-                            // 4. MACD 長線區塊
+                            // MACD 長線
                             const seriesH2 = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'm2', lastValueVisible: false, priceLineVisible: false }});
                             seriesH2.setData(rawData.filter(d => d.h2 !== undefined).map(d => ({{time: d.time, value: d.h2, color: d.h2 >= 0 ? 'rgba(239, 83, 80, 0.5)' : 'rgba(38, 166, 154, 0.5)'}})));
                             const seriesM2 = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, priceScaleId: 'm2', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             seriesM2.setData(rawData.filter(d => d.m2 !== undefined).map(d => ({{time: d.time, value: d.m2}})));
                             const seriesS2 = chart.addLineSeries({{ color: '#00E676', lineWidth: 1, priceScaleId: 'm2', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             seriesS2.setData(rawData.filter(d => d.s2 !== undefined).map(d => ({{time: d.time, value: d.s2}})));
-                            chart.priceScale('m2').applyOptions({{
-                                scaleMargins: {{ top: 0.85, bottom: 0.0 }},
-                                visible: false
-                            }});
+                            chart.priceScale('m2').applyOptions({{ scaleMargins: {{ top: 0.85, bottom: 0.0 }}, visible: false }});
 
-                            // 🔑 畫線 100% 成功法：直接畫一條滿版橫線 (不會被座標系隱藏)
+                            // 🔑 水平線：利用原生的 createPriceLine 保證顯示
                             hlines.forEach(val => {{
-                                if(rawData.length > 0) {{
-                                    const hline = chart.addLineSeries({{ color: '#2962FF', lineWidth: 2, lineStyle: 2, crosshairMarkerVisible: false, priceLineVisible: true, lastValueVisible: true }});
-                                    hline.setData(rawData.map(d => ({{time: d.time, value: val}})));
-                                }}
+                                seriesK.createPriceLine({{
+                                    price: val, color: '#2962FF', lineWidth: 2, lineStyle: 2, 
+                                    axisLabelVisible: true, title: '📏',
+                                }});
                             }});
 
                             const legend = document.getElementById('legend');
@@ -893,13 +879,17 @@ with tab4:
                                 legend.innerHTML = html;
                             }});
 
-                            chart.timeScale().fitContent();
-                            window.addEventListener('resize', () => {{ 
+                            // 🔑 解決擠成一團：加入 ResizeObserver 自動適應隱藏 Tab 的寬度變化！
+                            new ResizeObserver(() => {{
                                 chart.applyOptions({{
                                     width: document.getElementById('wrapper').clientWidth, 
                                     height: document.getElementById('wrapper').clientHeight
-                                }}); 
-                            }});
+                                }});
+                                chart.timeScale().fitContent();
+                            }}).observe(document.getElementById('wrapper'));
+                            
+                            // 初始化延遲刷新確保大小正確
+                            setTimeout(() => {{ chart.timeScale().fitContent(); }}, 100);
                         </script>
                     </body>
                     </html>
