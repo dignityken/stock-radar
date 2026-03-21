@@ -97,7 +97,7 @@ def check_password():
 if not check_password(): st.stop()  
 
 # ==========================================
-# 🆕 Google Sheets 雲端資料庫互動函數 (強化防呆與錯誤顯示)
+# 🆕 Google Sheets 雲端資料庫互動函數
 # ==========================================
 @st.cache_resource(ttl=3600)
 def init_gsheets():
@@ -112,7 +112,6 @@ def init_gsheets():
         scopes = ['https://www.googleapis.com/auth/spreadsheets']
         creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
         client = gspread.authorize(creds)
-        # 移除網址後方的 ?gid=0 參數，避免 gspread 解析錯誤
         raw_url = st.secrets["gsheets"]["spreadsheet_url"]
         clean_url = raw_url.split("?")[0]
         doc = client.open_by_url(clean_url)
@@ -133,7 +132,6 @@ def load_gsheet_watchlist(username):
         print(f"GSheets 載入失敗: {msg}")
         return []
     try:
-        # 新版 gspread 找不到會回傳 None
         cell = ws.find(username, in_column=1)
         if cell:
             data = ws.cell(cell.row, 2).value
@@ -150,19 +148,13 @@ def save_gsheet_watchlist(username, wl_list):
     try:
         data_str = json.dumps(wl_list, ensure_ascii=False)
         try:
-            # 尋找使用者名稱是否存在
             cell = ws.find(username, in_column=1)
-            
-            # 如果找到，更新第二欄的資料
             if cell:
                 ws.update_cell(cell.row, 2, data_str)
-            # 如果找不到 (回傳 None)，代表是新使用者，直接新增一行
             else:
                 ws.append_row([username, data_str])
-                
         except Exception as e:
             return False, f"寫入更新錯誤: {str(e)}"
-            
         return True, "成功寫入雲端"
     except Exception as e:
         return False, f"寫入錯誤: {str(e)}"
@@ -192,8 +184,6 @@ for tab in ['t1', 't2', 't3']:
 
 if 't4_target_sid' not in st.session_state: st.session_state.t4_target_sid = "6488"
 if 't4_target_br' not in st.session_state: st.session_state.t4_target_br = "兆豐-忠孝"
-if 't4_sid_ui_real' not in st.session_state: st.session_state.t4_sid_ui_real = "6488"
-if 't4_br_ui_real' not in st.session_state: st.session_state.t4_br_ui_real = "兆豐-忠孝"
 
 if 'auto_draw' not in st.session_state: st.session_state.auto_draw = False
 if 'custom_hlines' not in st.session_state: st.session_state.custom_hlines = []
@@ -457,9 +447,7 @@ with tab1:
                         if changes.get('送至 Tab4 繪圖', False) == True:
                             sid_clicked = df_show.iloc[row_idx]['extracted_stock_id']
                             st.session_state.t4_target_sid = sid_clicked
-                            st.session_state['t4_sid_ui_real'] = sid_clicked # 🌟 強制覆寫 UI
                             st.session_state.t4_target_br = sel_br_l
-                            st.session_state['t4_br_ui_real'] = sel_br_l     # 🌟 強制覆寫 UI
                             st.session_state.auto_draw = True
                             st.session_state.table_refresh_key += 1
                             st.rerun()
@@ -552,13 +540,11 @@ with tab2:
                         if changes.get('送至 Tab4 繪圖', False) == True:
                             br_clicked = df_show.iloc[row_idx]['券商']
                             st.session_state.t4_target_sid = t2_sid_clean
-                            st.session_state['t4_sid_ui_real'] = t2_sid_clean # 🌟 強制覆寫 UI
                             
                             clean_br = br_clicked.replace("亚","亞").strip()
                             matched_br = clean_br if clean_br in BROKER_MAP else next((k for k in BROKER_MAP if clean_br in k or k in clean_br), None)
                             if matched_br:
                                 st.session_state.t4_target_br = matched_br
-                                st.session_state['t4_br_ui_real'] = matched_br # 🌟 強制覆寫 UI
                                 
                             st.session_state.auto_draw = True
                             st.session_state.table_refresh_key += 1 
@@ -678,9 +664,7 @@ with tab3:
                         if changes.get('帶入K線', False) == True:
                             sid_clicked = df_show.iloc[row_idx]['extracted_stock_id']
                             st.session_state.t4_target_sid = sid_clicked
-                            st.session_state['t4_sid_ui_real'] = sid_clicked # 🌟 強制覆寫 UI
                             st.session_state.t4_target_br = sel_t3_br_l
-                            st.session_state['t4_br_ui_real'] = sel_t3_br_l  # 🌟 強制覆寫 UI
                             st.session_state.auto_draw = True
                             st.session_state.table_refresh_key += 1 
                             st.rerun()
@@ -701,11 +685,14 @@ with tab4:
     col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns([1, 1.5, 1, 1, 1])
     
     with col_t1:
-        # 🌟 改為直接綁定 session state 中的 t4_sid_ui_real 確保完全同步
-        t4_sid = st.text_input("股票代號", key="t4_sid_ui_real")
+        # 🌟 移除 key 綁定，改用 value 餵入，徹底解決 StreamlitAPIException
+        t4_sid = st.text_input("股票代號", value=st.session_state.get('t4_target_sid', '6488'))
     with col_t2:
         all_br_names = sorted(list(BROKER_MAP.keys()))
-        t4_br_name = st.selectbox("搜尋分點", all_br_names, key="t4_br_ui_real")
+        t4_br_val = st.session_state.get('t4_target_br', '兆豐-忠孝')
+        idx = all_br_names.index(t4_br_val) if t4_br_val in all_br_names else 0
+        # 🌟 移除 key 綁定，改用 index 餵入，徹底解決 StreamlitAPIException
+        t4_br_name = st.selectbox("搜尋分點", all_br_names, index=idx)
     with col_t3: 
         t4_period = st.radio("週期", ["日", "週", "月"], horizontal=True)
     with col_t4: 
@@ -739,7 +726,7 @@ with tab4:
     
     t4_sid_clean = t4_sid.strip().upper()
 
-    # 🌟 GSheets: 新增清單 (加入錯誤防呆回報)
+    # 🌟 GSheets: 新增清單
     if fav_btn:
         entry = {"股票代號": t4_sid_clean, "追蹤分點": t4_br_name}
         if entry not in st.session_state.watchlist:
@@ -782,14 +769,13 @@ with tab4:
             wl_config = {"載入": st.column_config.CheckboxColumn("載入繪圖"), "刪除": st.column_config.CheckboxColumn("刪除")}
             edited_wl = st.data_editor(wl_df, hide_index=True, column_config=wl_config, use_container_width=True, key="wl_editor")
             
+            # 🌟 從清單載入繪圖 (移除報錯的強制覆寫邏輯)
             if not edited_wl[edited_wl['載入'] == True].empty:
                 load_sid = edited_wl[edited_wl['載入'] == True].iloc[0]['股票代號']
                 load_br = edited_wl[edited_wl['載入'] == True].iloc[0]['追蹤分點']
                 
                 st.session_state.t4_target_sid = load_sid
-                st.session_state['t4_sid_ui_real'] = load_sid
                 st.session_state.t4_target_br = load_br
-                st.session_state['t4_br_ui_real'] = load_br
                 st.session_state.auto_draw = True
                 st.rerun()
                 
@@ -809,7 +795,7 @@ with tab4:
     if draw_btn or st.session_state.auto_draw:
         st.session_state.auto_draw = False 
         
-        # 同步回寫 UI 狀態
+        # 繪圖時同步回寫目前輸入框的狀態，確保下次重整時不會跑掉
         st.session_state.t4_target_sid = t4_sid
         st.session_state.t4_target_br = t4_br_name
         
