@@ -439,7 +439,7 @@ with tab1:
                 }
                 
                 editor_key = f"editor_{key_prefix}_{st.session_state.table_refresh_key}"
-                edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=editor_key)
+                edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, width="stretch", key=editor_key)
                 
                 if editor_key in st.session_state:
                     edits = st.session_state[editor_key].get('edited_rows', {})
@@ -532,7 +532,7 @@ with tab2:
                 }
                 
                 editor_key = f"editor_{key_prefix}_{st.session_state.table_refresh_key}"
-                edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=editor_key)
+                edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, width="stretch", key=editor_key)
                 
                 if editor_key in st.session_state:
                     edits = st.session_state[editor_key].get('edited_rows', {})
@@ -656,7 +656,7 @@ with tab3:
                 }
                 
                 editor_key = f"editor_{key_prefix}_{st.session_state.table_refresh_key}"
-                edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=editor_key)
+                edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, width="stretch", key=editor_key)
                 
                 if editor_key in st.session_state:
                     edits = st.session_state[editor_key].get('edited_rows', {})
@@ -699,16 +699,16 @@ with tab4:
         t4_days = st.number_input("K棒數", value=200, min_value=10, max_value=1000)
     with col_t5:
         st.write("") 
-        draw_btn = st.button("🎨 繪圖", use_container_width=True)
+        draw_btn = st.button("🎨 繪圖", width="stretch")
         
     col_x1, col_x2_1, col_x2_2, col_x3 = st.columns([1.5, 2, 1, 1.5])
     with col_x1:
-        fav_btn = st.button("❤️ 存入清單", use_container_width=True)
+        fav_btn = st.button("❤️ 存入清單", width="stretch")
     with col_x2_1:
         hline_val = st.number_input("📏 水平線價格", value=0.0, step=1.0, key="hline_val_input")
     with col_x2_2:
         st.write("")
-        if st.button("➕ 加入畫線", use_container_width=True):
+        if st.button("➕ 加入畫線", width="stretch"):
             if hline_val > 0 and hline_val not in st.session_state.custom_hlines:
                 st.session_state.custom_hlines.append(hline_val)
             st.session_state.t4_target_sid = t4_sid
@@ -717,7 +717,7 @@ with tab4:
             st.rerun()
     with col_x3:
         st.write("")
-        if st.button("🗑️ 清除所有畫線", use_container_width=True):
+        if st.button("🗑️ 清除所有畫線", width="stretch"):
             st.session_state.custom_hlines = []
             st.session_state.t4_target_sid = t4_sid
             st.session_state.t4_target_br = t4_br_name
@@ -775,7 +775,7 @@ with tab4:
             
             # 2. 將動態 key 綁定給 data_editor
             editor_key = f"wl_editor_{st.session_state.wl_refresh_key}"
-            st.data_editor(wl_df, hide_index=True, column_config=wl_config, use_container_width=True, key=editor_key)
+            st.data_editor(wl_df, hide_index=True, column_config=wl_config, width="stretch", key=editor_key)
             
             # 3. 監聽點擊事件
             if editor_key in st.session_state:
