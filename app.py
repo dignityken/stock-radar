@@ -138,10 +138,12 @@ def load_gsheet_watchlist(username):
             data = ws.cell(cell.row, 2).value
             if data:
                 return json.loads(data)
-    except gspread.exceptions.CellNotFound:
-        pass
     except Exception as e:
-        print(f"GSheets 讀取錯誤: {e}")
+        # 如果找不到 Cell，gspread 會拋出錯誤，我們直接忽略當作「新用戶」處理
+        if "not found" in str(e).lower() or "cellnotfound" in str(type(e)).lower():
+            pass
+        else:
+            print(f"GSheets 讀取錯誤: {e}")
     return []
 
 def save_gsheet_watchlist(username, wl_list):
@@ -153,8 +155,12 @@ def save_gsheet_watchlist(username, wl_list):
         try:
             cell = ws.find(username, in_column=1)
             ws.update_cell(cell.row, 2, data_str)
-        except gspread.exceptions.CellNotFound:
-            ws.append_row([username, data_str])
+        except Exception as e:
+            # 如果找不到該用戶 (CellNotFound)，就新增一行
+            if "not found" in str(e).lower() or "cellnotfound" in str(type(e)).lower():
+                ws.append_row([username, data_str])
+            else:
+                return False, f"寫入更新錯誤: {str(e)}"
         return True, "成功寫入雲端"
     except Exception as e:
         return False, f"寫入錯誤: {str(e)}"
