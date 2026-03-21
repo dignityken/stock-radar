@@ -306,6 +306,7 @@ with tab1:
             else: st.warning("無資料。")
         except Exception as e: st.error(f"發生錯誤: {e}")
 
+    # 顯示區塊 (不受按鈕重整影響)
     if st.session_state.t1_searched:
         def display_table_with_button(df_to_show, key_prefix):
             if not df_to_show.empty:
@@ -519,7 +520,7 @@ with tab3:
         st.markdown(f"### 🟢 該分點倒貨中 - 共 {len(st.session_state.t3_sell_df)} 檔")
         display_table_with_button_t3(st.session_state.t3_sell_df.sort_values(by=col_s, ascending=False).head(999 if show_full_t3 else 10), "t3_sell")
 
-# --- Tab 4 (TradingView 輕量版 完美無瑕版) ---
+# --- Tab 4 (TradingView 輕量版 保底防崩潰版) ---
 with tab4:
     col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns([1, 1.5, 1, 1, 1])
     with col_t1:
@@ -541,11 +542,10 @@ with tab4:
     with col_x1:
         fav_btn = st.button("❤️ 存入清單", use_container_width=True)
     with col_x2:
-        # 新增的畫線輸入框
         hline_val = st.number_input("📏 新增水平線 (輸入價格後按 Enter 即畫線)", value=0.0, step=1.0)
         if hline_val > 0 and hline_val not in st.session_state.custom_hlines:
             st.session_state.custom_hlines.append(hline_val)
-            st.session_state.auto_draw = True # 加入後自動重繪
+            st.session_state.auto_draw = True 
     with col_x3:
         st.write("")
         clear_btn = st.button("🗑️ 清除所有畫線", use_container_width=True)
@@ -610,7 +610,6 @@ with tab4:
                 df_k = get_stock_kline(t4_sid_clean)
                 if df_k.empty: st.error("找不到 K 線資料。")
                 else:
-                    # 抓取股票名稱
                     stock_name = ""
                     url_history = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?A={t4_sid_clean}&BHID={t4_br_id}&b={t4_br_id}&C=3&D=1999-1-1&E={datetime.date.today().strftime('%Y-%m-%d')}&ver=V3"
                     res_hist = requests.get(url_history, headers=HEADERS, verify=False, timeout=20)
@@ -652,51 +651,43 @@ with tab4:
                     macd1, sig1, hist1 = calculate_macd(df_resampled, int(macd1_f), int(macd1_s), int(macd1_sig))
                     macd2, sig2, hist2 = calculate_macd(df_resampled, int(macd2_f), int(macd2_s), int(macd2_sig))
                     
+                    # 💡 關鍵解法：將所有指標疊加到同一個 Dataframe 統一處理，丟棄全部副圖
                     df_plot = df_resampled.tail(int(t4_days)).copy()
                     
-                    # 🚀 建立字典型態資料，以時間為 Key，徹底解決 NaN 崩潰與跨表 Hover 讀不到資料的問題
-                    time_dict = {}
+                    df_plot['M1_hist'] = hist1.tail(int(t4_days))
+                    df_plot['M1_macd'] = macd1.tail(int(t4_days))
+                    df_plot['M1_sig'] = sig1.tail(int(t4_days))
+                    
+                    df_plot['M2_hist'] = hist2.tail(int(t4_days))
+                    df_plot['M2_macd'] = macd2.tail(int(t4_days))
+                    df_plot['M2_sig'] = sig2.tail(int(t4_days))
+
+                    # 轉化為 JS 陣列
+                    all_data = []
                     for i, row in df_plot.iterrows():
-                        t_str = row['Date_str']
-                        time_dict[t_str] = {
-                            "k": {"time": t_str, "open": safe_float(row['Open']), "high": safe_float(row['High']), "low": safe_float(row['Low']), "close": safe_float(row['Close'])},
-                            "v": {"time": t_str, "value": safe_float(row['買賣超']), "color": '#ef5350' if row['買賣超'] >= 0 else '#26a69a'}
+                        if pd.isna(row['Close']): continue
+                        
+                        item = {
+                            "time": row['Date_str'],
+                            "open": safe_float(row['Open']), "high": safe_float(row['High']),
+                            "low": safe_float(row['Low']), "close": safe_float(row['Close']),
+                            "vol": safe_float(row['買賣超'])
                         }
-                        if not pd.isna(row['BB_mid']): time_dict[t_str]["bb_mid"] = safe_float(row['BB_mid'])
-                        if not pd.isna(row['BB_up']): time_dict[t_str]["bb_up"] = safe_float(row['BB_up'])
-                        if not pd.isna(row['BB_dn']): time_dict[t_str]["bb_dn"] = safe_float(row['BB_dn'])
+                        if not pd.isna(row['BB_mid']): item["bbm"] = safe_float(row['BB_mid'])
+                        if not pd.isna(row['BB_up']): item["bbu"] = safe_float(row['BB_up'])
+                        if not pd.isna(row['BB_dn']): item["bbd"] = safe_float(row['BB_dn'])
+                        
+                        if not pd.isna(row['M1_hist']): item["h1"] = safe_float(row['M1_hist'])
+                        if not pd.isna(row['M1_macd']): item["m1"] = safe_float(row['M1_macd'])
+                        if not pd.isna(row['M1_sig']): item["s1"] = safe_float(row['M1_sig'])
 
-                    def populate_indicator(series_name, series_data, is_hist=False):
-                        for t, v in zip(df_plot['Date_str'], series_data.tail(int(t4_days))):
-                            if not pd.isna(v):
-                                time_dict[t][series_name] = float(v)
-                                if is_hist: time_dict[t][series_name+"_c"] = '#ef5350' if v >= 0 else '#26a69a'
+                        if not pd.isna(row['M2_hist']): item["h2"] = safe_float(row['M2_hist'])
+                        if not pd.isna(row['M2_macd']): item["m2"] = safe_float(row['M2_macd'])
+                        if not pd.isna(row['M2_sig']): item["s2"] = safe_float(row['M2_sig'])
 
-                    populate_indicator("h1", hist1, True); populate_indicator("m1", macd1); populate_indicator("s1", sig1)
-                    populate_indicator("h2", hist2, True); populate_indicator("m2", macd2); populate_indicator("s2", sig2)
+                        all_data.append(item)
 
-                    # 萃取出給 JS 畫圖用的 Array
-                    candle_data = [d["k"] for d in time_dict.values()]
-                    volume_data = [d["v"] for d in time_dict.values()]
-                    bb_mid_data = [{"time": t, "value": d["bb_mid"]} for t, d in time_dict.items() if "bb_mid" in d]
-                    bb_up_data = [{"time": t, "value": d["bb_up"]} for t, d in time_dict.items() if "bb_up" in d]
-                    bb_dn_data = [{"time": t, "value": d["bb_dn"]} for t, d in time_dict.items() if "bb_dn" in d]
-                    h1_data = [{"time": t, "value": d["h1"], "color": d["h1_c"]} for t, d in time_dict.items() if "h1" in d]
-                    m1_data = [{"time": t, "value": d["m1"]} for t, d in time_dict.items() if "m1" in d]
-                    s1_data = [{"time": t, "value": d["s1"]} for t, d in time_dict.items() if "s1" in d]
-                    h2_data = [{"time": t, "value": d["h2"], "color": d["h2_c"]} for t, d in time_dict.items() if "h2" in d]
-                    m2_data = [{"time": t, "value": d["m2"]} for t, d in time_dict.items() if "m2" in d]
-                    s2_data = [{"time": t, "value": d["s2"]} for t, d in time_dict.items() if "s2" in d]
-
-                    # 🚀 無限多條水平線邏輯
                     hlines_js_array = json.dumps(st.session_state.custom_hlines)
-                    hlines_code = f"""
-                        const hlines = {hlines_js_array};
-                        hlines.forEach(val => {{
-                            const hline = chartMain.addLineSeries({{ color: '#2962FF', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, priceLineVisible: true, lastValueVisible: false }});
-                            hline.setData(candleData.map(d => ({{time: d.time, value: val}})));
-                        }});
-                    """
 
                     html_code = f"""
                     <!DOCTYPE html>
@@ -706,153 +697,112 @@ with tab4:
                         <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
                         <style>
                             body {{ margin: 0; padding: 0; background-color: #131722; overflow: hidden; font-family: "Microsoft JhengHei", sans-serif; }}
-                            #chart-container {{ width: 100vw; height: 95vh; display: flex; flex-direction: column; position: relative; }}
-                            .chart-wrapper {{ width: 100%; position: relative; }}
-                            #wrapper-main {{ flex: 4; border-bottom: 1px solid #2b2b43; }}
-                            #wrapper-macd1 {{ flex: 1.2; border-bottom: 1px solid #2b2b43; }}
-                            #wrapper-macd2 {{ flex: 1.2; }}
-                            .pane {{ width: 100%; height: 100%; position: absolute; top:0; left:0; }}
+                            #chart {{ width: 100vw; height: 95vh; position: relative; }}
                             
                             .tv-watermark {{
-                                position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
-                                font-size: 60px; font-weight: bold; color: rgba(255, 255, 255, 0.06);
-                                z-index: 1; pointer-events: none; white-space: nowrap; letter-spacing: 2px;
+                                position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%);
+                                font-size: 80px; font-weight: bold; color: rgba(255, 255, 255, 0.06);
+                                z-index: 1; pointer-events: none; white-space: nowrap; letter-spacing: 4px;
                             }}
                             
-                            /* 🌟 絕對置頂的懸浮視窗，不受圖表遮擋 */
-                            .floating-tooltip {{
-                                position: absolute; display: none; padding: 12px; box-sizing: border-box;
-                                font-size: 13px; color: #d1d4dc; background-color: rgba(19, 23, 34, 0.95);
-                                border: 1px solid #2962FF; border-radius: 6px; pointer-events: none; 
-                                z-index: 99999; /* 絕對置頂 */
-                                top: 12px; left: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.6);
+                            .tv-legend {{
+                                position: absolute; left: 12px; top: 12px; z-index: 100; font-size: 13px; color: #d1d4dc; 
+                                pointer-events: none; background: rgba(19, 23, 34, 0.85); padding: 8px 12px; 
+                                border-radius: 6px; border: 1px solid #363c4e; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
                             }}
-                            .tt-title {{ color: #2962FF; font-weight: bold; margin-bottom: 8px; font-size: 14px; border-bottom: 1px solid #363c4e; padding-bottom: 6px; }}
-                            .tt-row {{ display: flex; justify-content: space-between; margin-bottom: 4px; width: 150px; }}
-                            .tt-label {{ color: #8a8d9d; }}
-                            .tt-vol {{ margin-top: 8px; padding-top: 8px; border-top: 1px dashed #363c4e; font-size: 14px; display: flex; justify-content: space-between; }}
-                            
-                            .tv-legend {{ position: absolute; left: 12px; top: 8px; z-index: 100; font-size: 12px; color: #d1d4dc; pointer-events: none; background: rgba(19, 23, 34, 0.8); padding: 4px 8px; border-radius: 4px; border: 1px solid #363c4e; }}
+                            .lg-title {{ color: #2962FF; font-weight: bold; font-size: 15px; margin-bottom: 6px; border-bottom: 1px solid #444; padding-bottom: 4px; }}
+                            .lg-row {{ display: flex; justify-content: space-between; margin-bottom: 2px; width: 160px; }}
+                            .lg-label {{ color: #a0a3ab; }}
+                            .lg-vol {{ margin-top: 6px; padding-top: 6px; border-top: 1px dashed #555; font-size: 15px; display: flex; justify-content: space-between; font-weight: bold; }}
+                            .lg-macd {{ margin-top: 6px; font-size: 12px; color: #8a8d9d; line-height: 1.4; }}
                         </style>
                     </head>
                     <body>
-                        <div id="chart-container">
+                        <div id="chart">
                             <div class="tv-watermark">{t4_sid_clean} {stock_name}</div>
-                            <div id="main-tooltip" class="floating-tooltip"></div>
-                            
-                            <div id="wrapper-main" class="chart-wrapper">
-                                <div id="pane-main" class="pane"></div>
-                            </div>
-                            <div id="wrapper-macd1" class="chart-wrapper">
-                                <div id="pane-macd1" class="pane"></div>
-                                <div id="legend-macd1" class="tv-legend"></div>
-                            </div>
-                            <div id="wrapper-macd2" class="chart-wrapper">
-                                <div id="pane-macd2" class="pane"></div>
-                                <div id="legend-macd2" class="tv-legend"></div>
-                            </div>
+                            <div id="legend" class="tv-legend">將滑鼠移至 K 線上查看數據</div>
                         </div>
                         <script>
-                            const dictByTime = {json.dumps(time_dict)}; // 字典快查表，解決跨圖表 Hover 讀不到資料的問題
-                            const candleData = {json.dumps(candle_data)};
-                            const volumeData = {json.dumps(volume_data)};
-
+                            const rawData = {json.dumps(all_data)};
+                            const hlines = {hlines_js_array};
+                            
                             const layoutOptions = {{ layout: {{ backgroundColor: '#131722', textColor: '#d1d4dc' }}, grid: {{ vertLines: {{ color: '#242733' }}, horzLines: {{ color: '#242733' }} }}, crosshair: {{ mode: LightweightCharts.CrosshairMode.Normal }} }};
+                            const chart = LightweightCharts.createChart(document.getElementById('chart'), layoutOptions);
                             
-                            // 主圖
-                            const chartMain = LightweightCharts.createChart(document.getElementById('pane-main'), {{ ...layoutOptions, timeScale: {{ visible: false }} }});
-                            const seriesK = chartMain.addCandlestickSeries({{ upColor: '#ef5350', downColor: '#26a69a', borderVisible: false, wickUpColor: '#ef5350', wickDownColor: '#26a69a' }});
-                            seriesK.setData(candleData);
+                            // K線
+                            const seriesK = chart.addCandlestickSeries({{ upColor: '#ef5350', downColor: '#26a69a', borderVisible: false, wickUpColor: '#ef5350', wickDownColor: '#26a69a' }});
+                            seriesK.setData(rawData.map(d => ({{time: d.time, open: d.open, high: d.high, low: d.low, close: d.close}})));
                             
-                            // BB 指標：關閉價格線與最後數值，中軌黃色
-                            const bbMid = chartMain.addLineSeries({{ color: '#FFD600', lineWidth: 1, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
-                            bbMid.setData({json.dumps(bb_mid_data)});
-                            const bbUp = chartMain.addLineSeries({{ color: 'rgba(255, 255, 255, 0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
-                            bbUp.setData({json.dumps(bb_up_data)});
-                            const bbDn = chartMain.addLineSeries({{ color: 'rgba(255, 255, 255, 0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
-                            bbDn.setData({json.dumps(bb_dn_data)});
+                            // BB
+                            const bbMid = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
+                            bbMid.setData(rawData.filter(d => d.bbm !== undefined).map(d => ({{time: d.time, value: d.bbm}})));
+                            const bbUp = chart.addLineSeries({{ color: 'rgba(255, 255, 255, 0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
+                            bbUp.setData(rawData.filter(d => d.bbu !== undefined).map(d => ({{time: d.time, value: d.bbu}})));
+                            const bbDn = chart.addLineSeries({{ color: 'rgba(255, 255, 255, 0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
+                            bbDn.setData(rawData.filter(d => d.bbd !== undefined).map(d => ({{time: d.time, value: d.bbd}})));
                             
-                            // 買賣超柱狀圖：關閉右側價格線
-                            const seriesVol = chartMain.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: '', scaleMargins: {{ top: 0.8, bottom: 0 }}, lastValueVisible: false, priceLineVisible: false }});
-                            seriesVol.setData(volumeData);
-                            {hlines_code}
+                            // 買賣超 (放在主圖下方 15%)
+                            const seriesVol = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: '', scaleMargins: {{ top: 0.85, bottom: 0 }}, lastValueVisible: false, priceLineVisible: false }});
+                            seriesVol.setData(rawData.map(d => ({{time: d.time, value: d.vol, color: d.vol >= 0 ? 'rgba(239, 83, 80, 0.8)' : 'rgba(38, 166, 154, 0.8)'}})));
+                            
+                            // MACD 短線 (放在主圖下方 15%~30%)
+                            const seriesH1 = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'm1', scaleMargins: {{ top: 0.7, bottom: 0.15 }}, lastValueVisible: false, priceLineVisible: false }});
+                            seriesH1.setData(rawData.filter(d => d.h1 !== undefined).map(d => ({{time: d.time, value: d.h1, color: d.h1 >= 0 ? 'rgba(239, 83, 80, 0.5)' : 'rgba(38, 166, 154, 0.5)'}})));
+                            const seriesM1 = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, priceScaleId: 'm1', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
+                            seriesM1.setData(rawData.filter(d => d.m1 !== undefined).map(d => ({{time: d.time, value: d.m1}})));
+                            const seriesS1 = chart.addLineSeries({{ color: '#00E676', lineWidth: 1, priceScaleId: 'm1', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
+                            seriesS1.setData(rawData.filter(d => d.s1 !== undefined).map(d => ({{time: d.time, value: d.s1}})));
 
-                            // 副圖 1 (MACD 關閉價格線與最後數值)
-                            const chartM1 = LightweightCharts.createChart(document.getElementById('pane-macd1'), {{ ...layoutOptions, timeScale: {{ visible: false }} }});
-                            const seriesH1 = chartM1.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, lastValueVisible: false, priceLineVisible: false }});
-                            seriesH1.setData({json.dumps(h1_data)});
-                            const seriesMacd1 = chartM1.addLineSeries({{ color: '#FFD600', lineWidth: 1, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
-                            seriesMacd1.setData({json.dumps(m1_data)});
-                            const seriesSig1 = chartM1.addLineSeries({{ color: '#00E676', lineWidth: 1, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
-                            seriesSig1.setData({json.dumps(s1_data)});
+                            // MACD 長線 (放在主圖下方 30%~45%)
+                            const seriesH2 = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'm2', scaleMargins: {{ top: 0.55, bottom: 0.3 }}, lastValueVisible: false, priceLineVisible: false }});
+                            seriesH2.setData(rawData.filter(d => d.h2 !== undefined).map(d => ({{time: d.time, value: d.h2, color: d.h2 >= 0 ? 'rgba(239, 83, 80, 0.5)' : 'rgba(38, 166, 154, 0.5)'}})));
+                            const seriesM2 = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, priceScaleId: 'm2', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
+                            seriesM2.setData(rawData.filter(d => d.m2 !== undefined).map(d => ({{time: d.time, value: d.m2}})));
+                            const seriesS2 = chart.addLineSeries({{ color: '#00E676', lineWidth: 1, priceScaleId: 'm2', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
+                            seriesS2.setData(rawData.filter(d => d.s2 !== undefined).map(d => ({{time: d.time, value: d.s2}})));
 
-                            // 副圖 2
-                            const chartM2 = LightweightCharts.createChart(document.getElementById('pane-macd2'), {{ ...layoutOptions, timeScale: {{ borderColor: '#363c4e', rightOffset: 5 }} }});
-                            const seriesH2 = chartM2.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, lastValueVisible: false, priceLineVisible: false }});
-                            seriesH2.setData({json.dumps(h2_data)});
-                            const seriesMacd2 = chartM2.addLineSeries({{ color: '#FFD600', lineWidth: 1, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
-                            seriesMacd2.setData({json.dumps(m2_data)});
-                            const seriesSig2 = chartM2.addLineSeries({{ color: '#00E676', lineWidth: 1, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
-                            seriesSig2.setData({json.dumps(s2_data)});
+                            // 隱藏副圖的 Y 軸
+                            chart.priceScale('m1').applyOptions({{ visible: false }});
+                            chart.priceScale('m2').applyOptions({{ visible: false }});
 
-                            // 🔗 雙向時間軸與十字線同步 (完美吸附)
-                            const syncTime = (source, targets) => {{ source.timeScale().subscribeVisibleLogicalRangeChange(range => {{ if(range) targets.forEach(t => t.timeScale().setVisibleLogicalRange(range)); }}); }};
-                            syncTime(chartMain, [chartM1, chartM2]); syncTime(chartM1, [chartMain, chartM2]); syncTime(chartM2, [chartMain, chartM1]);
+                            // 水平線
+                            hlines.forEach(val => {{
+                                const hline = chart.addLineSeries({{ color: '#2962FF', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, priceLineVisible: true, lastValueVisible: false }});
+                                hline.setData(rawData.map(d => ({{time: d.time, value: val}})));
+                            }});
 
-                            const mainTooltip = document.getElementById('main-tooltip');
-                            const legM1 = document.getElementById('legend-macd1'), legM2 = document.getElementById('legend-macd2');
+                            // 超完美置頂資料窗
+                            const legend = document.getElementById('legend');
                             const getDayOfWeek = (d) => ['週日', '週一', '週二', '週三', '週四', '週五', '週六'][new Date(d).getDay()];
+                            const dictByTime = {{}}; rawData.forEach(d => dictByTime[d.time] = d);
 
-                            const syncCrosshair = (source, targets, seriesToPin) => {{
-                                source.subscribeCrosshairMove(param => {{
-                                    // 1. 處理全域 Tooltip 與 Legend (直接查字典)
-                                    if(!param.time || !dictByTime[param.time]) {{
-                                        mainTooltip.style.display = 'none';
-                                        legM1.innerHTML = ''; legM2.innerHTML = '';
-                                    }} else {{
-                                        const tData = dictByTime[param.time];
-                                        mainTooltip.style.display = 'block';
-                                        const vText = tData.v ? tData.v.value : 0;
-                                        const vColor = vText >= 0 ? '#ef5350' : '#26a69a';
-                                        
-                                        mainTooltip.innerHTML = `
-                                            <div class="tt-title">{t4_sid_clean} {stock_name} | ${{param.time}} ${{getDayOfWeek(param.time)}}</div>
-                                            <div class="tt-row"><span class="tt-label">開盤</span><span style="color:white;">${{tData.k.open.toFixed(2)}}</span></div>
-                                            <div class="tt-row"><span class="tt-label">最高</span><span style="color:#ef5350;">${{tData.k.high.toFixed(2)}}</span></div>
-                                            <div class="tt-row"><span class="tt-label">最低</span><span style="color:#26a69a;">${{tData.k.low.toFixed(2)}}</span></div>
-                                            <div class="tt-row"><span class="tt-label">收盤</span><span style="color:white;font-weight:bold;">${{tData.k.close.toFixed(2)}}</span></div>
-                                            <div class="tt-vol"><span class="tt-label">買賣超</span> <b style="color:${{vColor}};">${{vText}} 張</b></div>
-                                        `;
+                            chart.subscribeCrosshairMove(param => {{
+                                if(!param.time || !dictByTime[param.time] || param.point.x < 0 || param.point.y < 0) {{
+                                    legend.innerHTML = '將滑鼠移至 K 線上查看數據'; return;
+                                }}
+                                const d = dictByTime[param.time];
+                                const vColor = d.vol >= 0 ? '#ef5350' : '#26a69a';
+                                
+                                let html = `
+                                    <div class="lg-title">{t4_sid_clean} {stock_name} | ${{param.time}} ${{getDayOfWeek(param.time)}}</div>
+                                    <div class="lg-row"><span class="lg-label">開盤</span><span style="color:white;">${{d.open.toFixed(2)}}</span></div>
+                                    <div class="lg-row"><span class="lg-label">最高</span><span style="color:#ef5350;">${{d.high.toFixed(2)}}</span></div>
+                                    <div class="lg-row"><span class="lg-label">最低</span><span style="color:#26a69a;">${{d.low.toFixed(2)}}</span></div>
+                                    <div class="lg-row"><span class="lg-label">收盤</span><span style="color:white;font-weight:bold;">${{d.close.toFixed(2)}}</span></div>
+                                    <div class="lg-vol"><span class="lg-label">買賣超 ({t4_br_name})</span> <span style="color:${{vColor}};">${{d.vol}} 張</span></div>
+                                `;
 
-                                        if(tData.m1 !== undefined) legM1.innerHTML = `<b>短線 MACD</b> | 柱: <span style="color:${{tData.h1>=0?'#ef5350':'#26a69a'}}">${{tData.h1.toFixed(2)}}</span> | 快: <span style="color:#FFD600">${{tData.m1.toFixed(2)}}</span> | 慢: <span style="color:#00E676">${{tData.s1.toFixed(2)}}</span>`;
-                                        if(tData.m2 !== undefined) legM2.innerHTML = `<b>長線 MACD</b> | 柱: <span style="color:${{tData.h2>=0?'#ef5350':'#26a69a'}}">${{tData.h2.toFixed(2)}}</span> | 快: <span style="color:#FFD600">${{tData.m2.toFixed(2)}}</span> | 慢: <span style="color:#00E676">${{tData.s2.toFixed(2)}}</span>`;
-                                    }}
+                                if(d.h1 !== undefined) html += `<div class="lg-macd"><b>短 MACD:</b> 柱 <span style="color:${{d.h1>=0?'#ef5350':'#26a69a'}}">${{d.h1.toFixed(2)}}</span> | 快 <span style="color:#FFD600">${{d.m1.toFixed(2)}}</span> | 慢 <span style="color:#00E676">${{d.s1.toFixed(2)}}</span></div>`;
+                                if(d.h2 !== undefined) html += `<div class="lg-macd"><b>長 MACD:</b> 柱 <span style="color:${{d.h2>=0?'#ef5350':'#26a69a'}}">${{d.h2.toFixed(2)}}</span> | 快 <span style="color:#FFD600">${{d.m2.toFixed(2)}}</span> | 慢 <span style="color:#00E676">${{d.s2.toFixed(2)}}</span></div>`;
+                                
+                                legend.innerHTML = html;
+                            }});
 
-                                    // 2. 處理十字線同步 (透過時間與假價格觸發)
-                                    targets.forEach((t, index) => {{ 
-                                        if(param.time && dictByTime[param.time]) {{
-                                            // 隨便給一個價格讓十字線的直線畫出來即可
-                                            const fakePrice = dictByTime[param.time].k.close; 
-                                            t.setCrosshairPosition(fakePrice, param.time, seriesToPin[index]); 
-                                        }} else t.clearCrosshairPosition(); 
-                                    }});
-                                }});
-                            }};
-                            
-                            // 強制同步十字線
-                            syncCrosshair(chartMain, [chartM1, chartM2], [seriesMacd1, seriesMacd2]); 
-                            syncCrosshair(chartM1, [chartMain, chartM2], [seriesK, seriesMacd2]); 
-                            syncCrosshair(chartM2, [chartMain, chartM1], [seriesK, seriesMacd1]);
-
-                            chartMain.timeScale().fitContent(); chartM1.timeScale().fitContent(); chartM2.timeScale().fitContent();
-                            
-                            const wm = document.getElementById('wrapper-main'), w1 = document.getElementById('wrapper-macd1'), w2 = document.getElementById('wrapper-macd2');
-                            new ResizeObserver(e => chartMain.applyOptions({{width: wm.clientWidth, height: wm.clientHeight}})).observe(wm);
-                            new ResizeObserver(e => chartM1.applyOptions({{width: w1.clientWidth, height: w1.clientHeight}})).observe(w1);
-                            new ResizeObserver(e => chartM2.applyOptions({{width: w2.clientWidth, height: w2.clientHeight}})).observe(w2);
+                            chart.timeScale().fitContent();
+                            window.addEventListener('resize', () => {{ chart.applyOptions({{width: document.getElementById('chart').clientWidth, height: document.getElementById('chart').clientHeight}}); }});
                         </script>
                     </body>
                     </html>
                     """
-                    components.html(html_code, height=950)
+                    components.html(html_code, height=800)
             except Exception as e: st.error(f"發生錯誤: {e}")
