@@ -133,17 +133,14 @@ def load_gsheet_watchlist(username):
         print(f"GSheets 載入失敗: {msg}")
         return []
     try:
+        # 新版 gspread 找不到會回傳 None
         cell = ws.find(username, in_column=1)
         if cell:
             data = ws.cell(cell.row, 2).value
             if data:
                 return json.loads(data)
     except Exception as e:
-        # 如果找不到 Cell，gspread 會拋出錯誤，我們直接忽略當作「新用戶」處理
-        if "not found" in str(e).lower() or "cellnotfound" in str(type(e)).lower():
-            pass
-        else:
-            print(f"GSheets 讀取錯誤: {e}")
+        print(f"GSheets 讀取錯誤: {e}")
     return []
 
 def save_gsheet_watchlist(username, wl_list):
@@ -153,14 +150,19 @@ def save_gsheet_watchlist(username, wl_list):
     try:
         data_str = json.dumps(wl_list, ensure_ascii=False)
         try:
+            # 尋找使用者名稱是否存在
             cell = ws.find(username, in_column=1)
-            ws.update_cell(cell.row, 2, data_str)
-        except Exception as e:
-            # 如果找不到該用戶 (CellNotFound)，就新增一行
-            if "not found" in str(e).lower() or "cellnotfound" in str(type(e)).lower():
-                ws.append_row([username, data_str])
+            
+            # 如果找到，更新第二欄的資料
+            if cell:
+                ws.update_cell(cell.row, 2, data_str)
+            # 如果找不到 (回傳 None)，代表是新使用者，直接新增一行
             else:
-                return False, f"寫入更新錯誤: {str(e)}"
+                ws.append_row([username, data_str])
+                
+        except Exception as e:
+            return False, f"寫入更新錯誤: {str(e)}"
+            
         return True, "成功寫入雲端"
     except Exception as e:
         return False, f"寫入錯誤: {str(e)}"
