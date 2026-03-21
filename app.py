@@ -393,12 +393,27 @@ with tab2:
                 tables = pd.read_html(StringIO(res.text))
                 df_all = pd.DataFrame()
                 
-                # ✅ 【完美還原】回到您當初正常的解析法 (不再自作主張修改)
+                # ✅ 【完美修復 TAB 2 過濾】動態尋找券商欄位，無視 8 欄或 10 欄的變動！
                 for tb in tables:
-                    if tb.shape[1] == 10:
-                        l = tb.iloc[:,[0,1,2]].copy(); l.columns=['券商','買','賣']
-                        r = tb.iloc[:,[5,6,7]].copy(); r.columns=['券商','買','賣']
-                        df_all = pd.concat([df_all, l, r], ignore_index=True)
+                    if tb.shape[1] >= 6:
+                        # 檢查這張表有沒有「券商」字眼
+                        is_broker_table = False
+                        for col in tb.columns:
+                            if '券商' in str(col) or '券商' in str(tb[col].iloc[0]):
+                                is_broker_table = True
+                                break
+                        
+                        if is_broker_table:
+                            # 如果是標準的 10 欄
+                            if tb.shape[1] == 10:
+                                l = tb.iloc[:, [0,1,2]].copy(); l.columns = ['券商','買','賣']
+                                r = tb.iloc[:, [5,6,7]].copy(); r.columns = ['券商','買','賣']
+                                df_all = pd.concat([df_all, l, r], ignore_index=True)
+                            # 如果是偶爾縮水的 8 欄
+                            elif tb.shape[1] >= 8:
+                                l = tb.iloc[:, [0,1,2]].copy(); l.columns = ['券商','買','賣']
+                                r = tb.iloc[:, [4,5,6]].copy(); r.columns = ['券商','買','賣']
+                                df_all = pd.concat([df_all, l, r], ignore_index=True)
                 
                 if not df_all.empty:
                     df_all = df_all.dropna()
@@ -457,14 +472,15 @@ with tab2:
 
 # --- Tab 3 ---
 with tab3:
-    # ✅ 恢復完全正常的 GEO_MAP 下拉選單
+    # ✅ 【完美修復 TAB 3 下拉錯亂】給右邊選單加入動態 Key，保證同步更新！
     c1, c2 = st.columns(2)
     with c1:
         sorted_loc_keys = sorted(GEO_MAP.keys())
-        sel_loc = st.selectbox("選擇地緣關鍵字", sorted_loc_keys, key="t3_loc_sel")
+        sel_loc = st.selectbox("選擇地緣關鍵字 (下拉或輸入關鍵字搜尋)", sorted_loc_keys, key="t3_loc_sel")
     with c2:
         loc_branches = GEO_MAP[sel_loc]
-        sel_t3_br_l = st.selectbox("選擇特定分點", sorted(loc_branches.keys()), key="t3_br_sel")
+        # 動態 Key 防止錯亂
+        sel_t3_br_l = st.selectbox("選擇特定分點", sorted(loc_branches.keys()), key=f"t3_br_sel_{sel_loc}")
         sel_t3_br_id = loc_branches[sel_t3_br_l]['br_id']
         sel_t3_hq_id = loc_branches[sel_t3_br_l]['hq_id']
 
@@ -494,7 +510,6 @@ with tab3:
                 return ""
             processed_html_text = re.sub(r"<script[^>]*>(?:(?!</script>).)*GenLink2stk\s*\([^)]+\).*?</script>", extract_stock_name_from_script, res.text, flags=re.IGNORECASE | re.DOTALL)
             
-            # ✅ 【完美還原】回到您當初正常的解析法
             tables = pd.read_html(StringIO(processed_html_text))
             df_all = pd.DataFrame()
             for tb in tables:
@@ -564,7 +579,7 @@ with tab3:
         st.markdown(f"### 🟢 該分點倒貨中 - 共 {len(st.session_state.t3_sell_df)} 檔")
         display_table_with_button_t3(st.session_state.t3_sell_df.sort_values(by=col_s, ascending=False).head(999 if show_full_t3 else 10), "t3_sell")
 
-# --- Tab 4 (主力 K 線圖) ---
+# --- Tab 4 (主力 K 線圖 - 完美保留 Lightweight Charts 版) ---
 with tab4:
     if st.session_state.auto_draw:
         st.success("✅ 資料已同步，請直接查看下方圖表。")
@@ -587,7 +602,7 @@ with tab4:
     with col_x1:
         fav_btn = st.button("❤️ 存入清單", use_container_width=True)
     with col_x2_1:
-        # ✅ 把畫線功能切開，新增實體按鈕，保證 100% 觸發
+        # ✅ 把畫線功能切開，新增實體按鈕保證 100% 觸發
         hline_val = st.number_input("📏 水平線價格", value=0.0, step=1.0)
     with col_x2_2:
         st.write("")
@@ -657,6 +672,7 @@ with tab4:
         
         with st.spinner(f"為您繪製 {t4_sid_clean} 中..."):
             try:
+                # ✅ 具有快取，畫線時不會重抓浪費時間
                 df_k = get_stock_kline(t4_sid_clean)
                 
                 if df_k.empty: 
@@ -817,12 +833,16 @@ with tab4:
                             chart.priceScale('m1').applyOptions({{ visible: false }});
                             chart.priceScale('m2').applyOptions({{ visible: false }});
 
-                            // ✅ 修正：畫線邏輯添加防呆機制
+                            // ✅ 完美修復：改用 createPriceLine 官方方法，保證畫得出來！
                             hlines.forEach(val => {{
-                                if(rawData.length > 0) {{
-                                    const hline = chart.addLineSeries({{ color: '#2962FF', lineWidth: 2, lineStyle: 2, crosshairMarkerVisible: false, priceLineVisible: true, lastValueVisible: false }});
-                                    hline.setData(rawData.map(d => ({{time: d.time, value: val}})));
-                                }}
+                                seriesK.createPriceLine({{
+                                    price: val,
+                                    color: '#2962FF',
+                                    lineWidth: 2,
+                                    lineStyle: 2, 
+                                    axisLabelVisible: true,
+                                    title: '📏',
+                                }});
                             }});
 
                             const legend = document.getElementById('legend');
