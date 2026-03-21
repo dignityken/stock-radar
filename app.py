@@ -84,7 +84,6 @@ for tab in ['t1', 't2', 't3']:
     if f'{tab}_buy_df' not in st.session_state: st.session_state[f'{tab}_buy_df'] = pd.DataFrame()
     if f'{tab}_sell_df' not in st.session_state: st.session_state[f'{tab}_sell_df'] = pd.DataFrame()
 
-# ✅ 強制綁定 Tab4 元件狀態
 if 't4_sid_input' not in st.session_state: st.session_state.t4_sid_input = "6488"
 if 't4_br_input' not in st.session_state: st.session_state.t4_br_input = "兆豐-忠孝"
 if 'auto_draw' not in st.session_state: st.session_state.auto_draw = False
@@ -94,7 +93,6 @@ if 'custom_hlines' not in st.session_state: st.session_state.custom_hlines = []
 def send_to_tab4(sid, br_name):
     st.session_state.t4_sid_input = str(sid).strip().upper()
     clean_br = str(br_name).replace("亚","亞").strip()
-    # 確保分點名稱匹配到 BROKER_MAP
     matched_br = None
     if clean_br in BROKER_MAP:
         matched_br = clean_br
@@ -107,7 +105,7 @@ def send_to_tab4(sid, br_name):
         st.session_state.t4_br_input = matched_br
         
     st.session_state.auto_draw = True
-    st.rerun() # ✅ 強制重新載入頁面，瞬間跳轉並繪圖
+    st.rerun()
 
 # ==========================================
 # 資料載入與處理函數
@@ -186,8 +184,10 @@ GEO_MAP = {}
 for br_name, br_info in BROKER_MAP.items():
     if "-" in br_name:
         loc_name = br_name.split("-")[-1].replace("(停)", "").strip()
-        if loc_name not in GEO_MAP: GEO_MAP[loc_name] = {}
-        GEO_MAP[loc_name][br_name] = br_info
+        if loc_name and loc_name not in GEO_MAP: 
+            GEO_MAP[loc_name] = {}
+        if loc_name:
+            GEO_MAP[loc_name][br_name] = br_info
 
 def get_stock_id(name_str):
     s = str(name_str).strip()
@@ -222,7 +222,6 @@ def get_stock_kline(stock_id):
             return df
     return pd.DataFrame()
 
-# ✅ 加入高速快取：為了讓 Tab 4 多線畫圖不卡頓
 @st.cache_data(ttl=1800)
 def get_fubon_history_and_name(sid, br_id):
     today_str = datetime.date.today().strftime('%Y-%m-%d')
@@ -349,7 +348,6 @@ with tab1:
                     "extracted_stock_id": None 
                 }
                 
-                # ✅ 正確攔截點擊事件並避免無限迴圈
                 editor_key = f"editor_{key_prefix}"
                 st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=editor_key)
                 
@@ -358,7 +356,7 @@ with tab1:
                     for row_idx, edits in edited_rows.items():
                         if edits.get('畫圖', False) == True:
                             sid_clicked = df_show.iloc[row_idx]['extracted_stock_id']
-                            del st.session_state[editor_key]  # 清除勾選狀態
+                            del st.session_state[editor_key]  
                             send_to_tab4(sid_clicked, sel_br_l)
                             break
 
@@ -395,15 +393,12 @@ with tab2:
                 tables = pd.read_html(StringIO(res.text))
                 df_all = pd.DataFrame()
                 
-                # ✅ 穩健的表格過濾法 (避免富邦欄位數量跳動導致崩潰)
+                # ✅ 【完美還原】回到您當初正常的解析法 (不再自作主張修改)
                 for tb in tables:
-                    if tb.shape[1] >= 8 and any('券商' in str(c) for c in tb.values.flatten()):
-                        try:
-                            l = tb.iloc[:, [0, 1, 2]].copy(); l.columns = ['券商', '買', '賣']
-                            mid_idx = tb.shape[1] // 2
-                            r = tb.iloc[:, [mid_idx, mid_idx+1, mid_idx+2]].copy(); r.columns = ['券商', '買', '賣']
-                            df_all = pd.concat([df_all, l, r], ignore_index=True)
-                        except: pass
+                    if tb.shape[1] == 10:
+                        l = tb.iloc[:,[0,1,2]].copy(); l.columns=['券商','買','賣']
+                        r = tb.iloc[:,[5,6,7]].copy(); r.columns=['券商','買','賣']
+                        df_all = pd.concat([df_all, l, r], ignore_index=True)
                 
                 if not df_all.empty:
                     df_all = df_all.dropna()
@@ -443,7 +438,6 @@ with tab2:
                     "畫圖": st.column_config.CheckboxColumn("送至Tab4")
                 }
                 
-                # ✅ 正確攔截
                 editor_key = f"editor_{key_prefix}"
                 st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=editor_key)
                 
@@ -463,11 +457,11 @@ with tab2:
 
 # --- Tab 3 ---
 with tab3:
-    # ✅ 恢復下拉選單，並支援下拉搜尋
+    # ✅ 恢復完全正常的 GEO_MAP 下拉選單
     c1, c2 = st.columns(2)
     with c1:
         sorted_loc_keys = sorted(GEO_MAP.keys())
-        sel_loc = st.selectbox("選擇地緣關鍵字 (下拉或輸入關鍵字搜尋)", sorted_loc_keys, key="t3_loc_sel")
+        sel_loc = st.selectbox("選擇地緣關鍵字", sorted_loc_keys, key="t3_loc_sel")
     with c2:
         loc_branches = GEO_MAP[sel_loc]
         sel_t3_br_l = st.selectbox("選擇特定分點", sorted(loc_branches.keys()), key="t3_br_sel")
@@ -499,6 +493,8 @@ with tab3:
                 if m: return f"{m.group(1).strip()}{m.group(2).strip()}"
                 return ""
             processed_html_text = re.sub(r"<script[^>]*>(?:(?!</script>).)*GenLink2stk\s*\([^)]+\).*?</script>", extract_stock_name_from_script, res.text, flags=re.IGNORECASE | re.DOTALL)
+            
+            # ✅ 【完美還原】回到您當初正常的解析法
             tables = pd.read_html(StringIO(processed_html_text))
             df_all = pd.DataFrame()
             for tb in tables:
@@ -549,7 +545,6 @@ with tab3:
                     "extracted_stock_id": None 
                 }
                 
-                # ✅ 正確攔截
                 editor_key = f"editor_{key_prefix}"
                 st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=editor_key)
                 
@@ -569,7 +564,7 @@ with tab3:
         st.markdown(f"### 🟢 該分點倒貨中 - 共 {len(st.session_state.t3_sell_df)} 檔")
         display_table_with_button_t3(st.session_state.t3_sell_df.sort_values(by=col_s, ascending=False).head(999 if show_full_t3 else 10), "t3_sell")
 
-# --- Tab 4 (主力 K 線圖 - 完美保留 Lightweight Charts 版) ---
+# --- Tab 4 (主力 K 線圖) ---
 with tab4:
     if st.session_state.auto_draw:
         st.success("✅ 資料已同步，請直接查看下方圖表。")
@@ -588,18 +583,21 @@ with tab4:
         st.write("") 
         draw_btn = st.button("🎨 繪圖", use_container_width=True)
         
-    col_x1, col_x2, col_x3 = st.columns([1, 2, 1])
+    col_x1, col_x2_1, col_x2_2, col_x3 = st.columns([1.5, 2, 1, 1.5])
     with col_x1:
         fav_btn = st.button("❤️ 存入清單", use_container_width=True)
-    with col_x2:
-        # ✅ 使用快取技術，這裡輸入數字後瞬間畫線！
-        hline_val = st.number_input("📏 新增水平線 (輸入價格後按 Enter 即畫線)", value=0.0, step=1.0)
-        if hline_val > 0 and hline_val not in st.session_state.custom_hlines:
-            st.session_state.custom_hlines.append(hline_val)
-            st.session_state.auto_draw = True 
+    with col_x2_1:
+        # ✅ 把畫線功能切開，新增實體按鈕，保證 100% 觸發
+        hline_val = st.number_input("📏 水平線價格", value=0.0, step=1.0)
+    with col_x2_2:
+        st.write("")
+        if st.button("➕ 加入畫線", use_container_width=True):
+            if hline_val > 0 and hline_val not in st.session_state.custom_hlines:
+                st.session_state.custom_hlines.append(hline_val)
+                st.session_state.auto_draw = True
+                st.rerun()
     with col_x3:
         st.write("")
-        # ✅ 清除所有畫線按鈕
         clear_btn = st.button("🗑️ 清除所有畫線", use_container_width=True)
         if clear_btn:
             st.session_state.custom_hlines = []
@@ -659,7 +657,6 @@ with tab4:
         
         with st.spinner(f"為您繪製 {t4_sid_clean} 中..."):
             try:
-                # ✅ 具有快取，畫線時不會重抓浪費時間
                 df_k = get_stock_kline(t4_sid_clean)
                 
                 if df_k.empty: 
@@ -725,7 +722,6 @@ with tab4:
 
                     hlines_js_array = json.dumps(st.session_state.custom_hlines)
 
-                    # ✅ 完美保留的 Lightweight Charts 版本 (含 YYYY-MM-DD 日期格式修復與浮水印)
                     html_code = f"""
                     <!DOCTYPE html>
                     <html>
@@ -821,9 +817,12 @@ with tab4:
                             chart.priceScale('m1').applyOptions({{ visible: false }});
                             chart.priceScale('m2').applyOptions({{ visible: false }});
 
+                            // ✅ 修正：畫線邏輯添加防呆機制
                             hlines.forEach(val => {{
-                                const hline = chart.addLineSeries({{ color: '#2962FF', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, priceLineVisible: true, lastValueVisible: false }});
-                                hline.setData(rawData.map(d => ({{time: d.time, value: val}})));
+                                if(rawData.length > 0) {{
+                                    const hline = chart.addLineSeries({{ color: '#2962FF', lineWidth: 2, lineStyle: 2, crosshairMarkerVisible: false, priceLineVisible: true, lastValueVisible: false }});
+                                    hline.setData(rawData.map(d => ({{time: d.time, value: val}})));
+                                }}
                             }});
 
                             const legend = document.getElementById('legend');
