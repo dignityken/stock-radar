@@ -7,8 +7,8 @@ import datetime
 import urllib3
 import unicodedata
 import yfinance as yf
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+import json
+import streamlit.components.v1 as components
 
 # 忽略 SSL 警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -84,18 +84,13 @@ for tab in ['t1', 't2', 't3']:
     if f'{tab}_buy_df' not in st.session_state: st.session_state[f'{tab}_buy_df'] = pd.DataFrame()
     if f'{tab}_sell_df' not in st.session_state: st.session_state[f'{tab}_sell_df'] = pd.DataFrame()
 
-# 🎯 核心修正：強制綁定 UI 輸入框的 Key
 if 't4_sid_ui' not in st.session_state: st.session_state.t4_sid_ui = "6488"
 if 't4_br_ui' not in st.session_state: st.session_state.t4_br_ui = "兆豐-忠孝"
 if 'auto_draw' not in st.session_state: st.session_state.auto_draw = False
 if 't4_drawn' not in st.session_state: st.session_state.t4_drawn = False
-if 'locked_sid' not in st.session_state: st.session_state.locked_sid = "6488"
-if 'locked_br_id' not in st.session_state: st.session_state.locked_br_id = "0037003000300061"
-if 'locked_br_name' not in st.session_state: st.session_state.locked_br_name = "兆豐-忠孝"
 if 'watchlist' not in st.session_state: st.session_state.watchlist = []
 
 def send_to_tab4(sid, br_name):
-    """跨頁傳送函數：直接改寫 Tab4 輸入框的底層數值"""
     st.session_state.t4_sid_ui = sid
     clean_br = br_name.replace("亚","亞").strip()
     if clean_br in BROKER_MAP:
@@ -307,6 +302,7 @@ with tab1:
             else: st.warning("無資料。")
         except Exception as e: st.error(f"發生錯誤: {e}")
 
+    # --- 獨立顯示區塊 (不受按鈕重整影響) ---
     if st.session_state.t1_searched:
         def display_table_with_button(df_to_show, key_prefix):
             if not df_to_show.empty:
@@ -520,21 +516,24 @@ with tab3:
         st.markdown(f"### 🟢 該分點倒貨中 - 共 {len(st.session_state.t3_sell_df)} 檔")
         display_table_with_button_t3(st.session_state.t3_sell_df.sort_values(by=col_s, ascending=False).head(999 if show_full_t3 else 10), "t3_sell")
 
-# --- Tab 4 (專業繪圖 - 回歸 Plotly 並強化手機體驗) ---
+# --- Tab 4 (專業繪圖 - 終極 TradingView 輕量版) ---
 with tab4:
-    col1, col2, col3, col4 = st.columns([1, 1.5, 1, 1])
+    col1, col2, col3, col4, col5, col6 = st.columns([1, 1.5, 0.5, 0.5, 0.5, 1])
     with col1:
-        # 強制綁定 Session State
-        t4_sid = st.text_input("股票代號", key="t4_sid_ui")
+        t4_sid = st.text_input("股票代號", st.session_state.t4_sid_ui, key="t4_sid_input")
     with col2:
         all_br_names = sorted(list(BROKER_MAP.keys()))
-        t4_br_name = st.selectbox("搜尋分點", all_br_names, key="t4_br_ui")
-    with col3:
+        passed_br = st.session_state.t4_br_ui
+        default_br_idx = all_br_names.index(passed_br) if passed_br in all_br_names else 0
+        t4_br_name = st.selectbox("搜尋分點", all_br_names, index=default_br_idx, key="t4_br_input")
+    with col3: t4_period = st.radio("K線週期", ["日", "週", "月"], horizontal=False)
+    with col4: t4_days = st.number_input("近期K棒", value=150, min_value=10, max_value=1000)
+    with col5:
         st.write("") 
-        draw_btn = st.button("🎨 繪製專業圖表", use_container_width=True)
-    with col4:
+        draw_btn = st.button("🎨 繪製", use_container_width=True)
+    with col6:
         st.write("")
-        fav_btn = st.button("❤️ 加入暫存清單", use_container_width=True)
+        fav_btn = st.button("❤️ 存入清單", use_container_width=True)
 
     t4_sid_clean = t4_sid.strip().upper()
     
@@ -546,24 +545,18 @@ with tab4:
         else:
             st.warning("⚠️ 已在清單中。")
 
-    with st.expander("⚙️ 圖表設定與手機水平線工具", expanded=False):
-        hline_val = st.number_input("📏 手機畫線救星：輸入價格後圖表即會產生精準水平線", value=0.0, step=1.0)
-        tc1, tc2 = st.columns([1,2])
-        with tc1: 
-            t4_days = st.number_input("顯示最近幾根K棒?", value=200, min_value=10, max_value=1000)
-            t4_period = st.radio("K線週期", ["日", "週", "月"], horizontal=True)
-        with tc2:
+    with st.expander("⚙️ 進階指標參數設定", expanded=False):
+        sc1, sc2, sc3 = st.columns(3)
+        with sc1: 
             st.markdown("**布林通道**")
             bb_w = st.number_input("週期", value=52)
             bb_std = st.number_input("標準差", value=2.0, step=0.1)
-        st.markdown("---")
-        sc1, sc2 = st.columns(2)
-        with sc1: 
+        with sc2: 
             st.markdown("**短線 MACD**")
             macd1_f = st.number_input("快線", value=12, key="m1f")
             macd1_s = st.number_input("慢線", value=26, key="m1s")
             macd1_sig = st.number_input("訊號", value=9, key="m1sig")
-        with sc2: 
+        with sc3: 
             st.markdown("**長線 MACD**")
             macd2_f = st.number_input("快線", value=26, key="m2f")
             macd2_s = st.number_input("慢線", value=52, key="m2s")
@@ -586,7 +579,7 @@ with tab4:
                 st.session_state.watchlist = [item for item in st.session_state.watchlist if not (item['股票代號'] == del_sid and item['追蹤分點'] == del_br)]
                 st.rerun()
 
-    # 執行繪圖 (點擊按鈕或從其他分頁傳遞參數)
+    # 執行繪圖
     if draw_btn or st.session_state.auto_draw:
         st.session_state.auto_draw = False 
         t4_br_id = BROKER_MAP[t4_br_name]['br_id']
@@ -597,8 +590,6 @@ with tab4:
                 if df_k.empty: st.error("找不到 K 線資料。")
                 else:
                     df_broker = get_fubon_history(t4_sid_clean, t4_br_id)
-                    if df_broker.empty: st.info("近期無交易紀錄。")
-
                     df_merged = pd.merge(df_k, df_broker[['Date', '買賣超']], on='Date', how='left')
                     df_merged['買賣超'] = df_merged['買賣超'].fillna(0) 
                     
@@ -612,69 +603,124 @@ with tab4:
 
                     df_resampled['BB_mid'] = df_resampled['Close'].rolling(int(bb_w)).mean()
                     df_resampled['BB_std'] = df_resampled['Close'].rolling(int(bb_w)).std()
-                    df_resampled['BB_up'] = df_resampled['BB_mid'] + bb_std * df_resampled['BB_std']
-                    df_resampled['BB_dn'] = df_resampled['BB_mid'] - bb_std * df_resampled['BB_std']
+                    df_resampled['BB_up'] = df_resampled['BB_mid'] + 2.0 * df_resampled['BB_std']
+                    df_resampled['BB_dn'] = df_resampled['BB_mid'] - 2.0 * df_resampled['BB_std']
                     
                     macd1, sig1, hist1 = calculate_macd(df_resampled, int(macd1_f), int(macd1_s), int(macd1_sig))
                     macd2, sig2, hist2 = calculate_macd(df_resampled, int(macd2_f), int(macd2_s), int(macd2_sig))
                     
                     df_plot = df_resampled.tail(int(t4_days)).copy()
                     
-                    fig = make_subplots(
-                        rows=4, cols=1, shared_xaxes=True, 
-                        vertical_spacing=0.03, row_heights=[0.5, 0.2, 0.15, 0.15],
-                        subplot_titles=("K線與布林通道", f"分點買賣超 ({t4_br_name})", "MACD (短線)", "MACD (長線)")
-                    )
-                    
-                    colors_k = ['#FF3333' if close >= open else '#00AA00' for close, open in zip(df_plot['Close'], df_plot['Open'])]
-                    colors_vol = ['#FF3333' if val >= 0 else '#00AA00' for val in df_plot['買賣超']]
+                    candle_data = [{"time": row['Date_str'], "open": row['Open'], "high": row['High'], "low": row['Low'], "close": row['Close']} for _, row in df_plot.iterrows()]
+                    volume_data = [{"time": row['Date_str'], "value": row['買賣超'], "color": '#ef5350' if row['買賣超'] >= 0 else '#26a69a'} for _, row in df_plot.iterrows()]
+                    bb_up_data = [{"time": row['Date_str'], "value": row['BB_up']} for _, row in df_plot.dropna(subset=['BB_up']).iterrows()]
+                    bb_dn_data = [{"time": row['Date_str'], "value": row['BB_dn']} for _, row in df_plot.dropna(subset=['BB_dn']).iterrows()]
 
-                    # 終極清晰黑底白字 Hover (移除 T00:00:00)
-                    custom_hover = "<b>%{x}</b><br><br><b>開盤: %{open:.2f}</b><br><b>最高: %{high:.2f}</b><br><b>最低: %{low:.2f}</b><br><b>收盤: %{close:.2f}</b><extra></extra>"
+                    h1_data = [{"time": time, "value": val, "color": '#ef5350' if val >= 0 else '#26a69a'} for time, val in zip(df_plot['Date_str'], hist1.tail(int(t4_days)))]
+                    m1_data = [{"time": time, "value": val} for time, val in zip(df_plot['Date_str'], macd1.tail(int(t4_days)))]
+                    s1_data = [{"time": time, "value": val} for time, val in zip(df_plot['Date_str'], sig1.tail(int(t4_days)))]
 
-                    fig.add_trace(go.Candlestick(
-                        x=df_plot['Date_str'], open=df_plot['Open'], high=df_plot['High'],
-                        low=df_plot['Low'], close=df_plot['Close'], name='K線',
-                        increasing_line_color='#FF3333', decreasing_line_color='#00AA00',
-                        hovertemplate=custom_hover
-                    ), row=1, col=1)
-                    
-                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=df_plot['BB_mid'], line=dict(color='rgba(255, 255, 255, 0.4)', width=1), name='BB中軌', hoverinfo='skip'), row=1, col=1)
-                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=df_plot['BB_up'], line=dict(color='rgba(173, 216, 230, 0.5)', width=1, dash='dot'), name='BB上軌', hoverinfo='skip'), row=1, col=1)
-                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=df_plot['BB_dn'], fill='tonexty', fillcolor='rgba(173, 216, 230, 0.1)', line=dict(color='rgba(173, 216, 230, 0.5)', width=1, dash='dot'), name='BB下軌', hoverinfo='skip'), row=1, col=1)
+                    h2_data = [{"time": time, "value": val, "color": '#ef5350' if val >= 0 else '#26a69a'} for time, val in zip(df_plot['Date_str'], hist2.tail(int(t4_days)))]
+                    m2_data = [{"time": time, "value": val} for time, val in zip(df_plot['Date_str'], macd2.tail(int(t4_days)))]
+                    s2_data = [{"time": time, "value": val} for time, val in zip(df_plot['Date_str'], sig2.tail(int(t4_days)))]
 
-                    fig.add_trace(go.Bar(x=df_plot['Date_str'], y=df_plot['買賣超'], marker_color=colors_vol, hovertemplate="<b>%{y} 張</b><extra></extra>"), row=2, col=1)
+                    html_code = f"""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+                        <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+                        <style>
+                            body {{ margin: 0; padding: 0; background-color: #131722; overflow: hidden; font-family: sans-serif; }}
+                            #chart-container {{ width: 100vw; height: 95vh; display: flex; flex-direction: column; }}
+                            .chart-pane {{ width: 100%; position: relative; border-bottom: 1px solid #2b2b43; }}
+                            #pane-main {{ flex: 4; }} #pane-macd1, #pane-macd2 {{ flex: 1; }}
+                            .tv-legend {{ position: absolute; left: 10px; top: 10px; z-index: 100; font-size: 12px; color: #d1d4dc; pointer-events: none; background: rgba(19, 23, 34, 0.6); padding: 4px; border-radius: 4px; }}
+                            .tv-title {{ font-weight: bold; color: #2962FF; margin-bottom: 4px; font-size: 14px; }}
+                        </style>
+                    </head>
+                    <body>
+                        <div id="chart-container">
+                            <div id="pane-main" class="chart-pane"><div id="legend-main" class="tv-legend"></div></div>
+                            <div id="pane-macd1" class="chart-pane"><div id="legend-macd1" class="tv-legend"></div></div>
+                            <div id="pane-macd2" class="chart-pane"><div id="legend-macd2" class="tv-legend"></div></div>
+                        </div>
+                        <script>
+                            const layoutOptions = {{ layout: {{ background: {{ type: 'solid', color: '#131722' }}, textColor: '#d1d4dc' }}, grid: {{ vertLines: {{ color: '#2b2b43' }}, horzLines: {{ color: '#2b2b43' }} }}, crosshair: {{ mode: LightweightCharts.CrosshairMode.Normal }} }};
+                            
+                            // 主圖 (K線 + 買賣超 + BB)
+                            const chartMain = LightweightCharts.createChart(document.getElementById('pane-main'), {{ ...layoutOptions, timeScale: {{ visible: false }} }});
+                            const seriesK = chartMain.addCandlestickSeries({{ upColor: '#ef5350', downColor: '#26a69a', borderVisible: false, wickUpColor: '#ef5350', wickDownColor: '#26a69a' }});
+                            seriesK.setData({json.dumps(candle_data)});
+                            const bbUp = chartMain.addLineSeries({{ color: 'rgba(41, 98, 255, 0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false }});
+                            bbUp.setData({json.dumps(bb_up_data)});
+                            const bbDn = chartMain.addLineSeries({{ color: 'rgba(41, 98, 255, 0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false }});
+                            bbDn.setData({json.dumps(bb_dn_data)});
+                            const seriesVol = chartMain.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: '', scaleMargins: {{ top: 0.8, bottom: 0 }} }});
+                            seriesVol.setData({json.dumps(volume_data)});
 
-                    fig.add_trace(go.Bar(x=df_plot['Date_str'], y=hist1.tail(int(t4_days)), marker_color=['#FF3333' if val >= 0 else '#00AA00' for val in hist1.tail(int(t4_days))], hovertemplate="<b>%{y:.2f}</b><extra></extra>"), row=3, col=1)
-                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=macd1.tail(int(t4_days)), line=dict(color='yellow', width=1), hoverinfo='skip'), row=3, col=1)
-                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=sig1.tail(int(t4_days)), line=dict(color='cyan', width=1), hoverinfo='skip'), row=3, col=1)
+                            // 副圖 1 (MACD 短線)
+                            const chartM1 = LightweightCharts.createChart(document.getElementById('pane-macd1'), {{ ...layoutOptions, timeScale: {{ visible: false }} }});
+                            const seriesH1 = chartM1.addHistogramSeries({{ priceFormat: {{ type: 'volume' }} }});
+                            seriesH1.setData({json.dumps(h1_data)});
+                            const seriesMacd1 = chartM1.addLineSeries({{ color: '#FFD600', lineWidth: 1, crosshairMarkerVisible: false }});
+                            seriesMacd1.setData({json.dumps(m1_data)});
+                            const seriesSig1 = chartM1.addLineSeries({{ color: '#00E676', lineWidth: 1, crosshairMarkerVisible: false }});
+                            seriesSig1.setData({json.dumps(s1_data)});
 
-                    fig.add_trace(go.Bar(x=df_plot['Date_str'], y=hist2.tail(int(t4_days)), marker_color=['#FF3333' if val >= 0 else '#00AA00' for val in hist2.tail(int(t4_days))], hovertemplate="<b>%{y:.2f}</b><extra></extra>"), row=4, col=1)
-                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=macd2.tail(int(t4_days)), line=dict(color='yellow', width=1), hoverinfo='skip'), row=4, col=1)
-                    fig.add_trace(go.Scatter(x=df_plot['Date_str'], y=sig2.tail(int(t4_days)), line=dict(color='cyan', width=1), hoverinfo='skip'), row=4, col=1)
+                            // 副圖 2 (MACD 長線)
+                            const chartM2 = LightweightCharts.createChart(document.getElementById('pane-macd2'), {{ ...layoutOptions, timeScale: {{ borderColor: '#363c4e' }} }});
+                            const seriesH2 = chartM2.addHistogramSeries({{ priceFormat: {{ type: 'volume' }} }});
+                            seriesH2.setData({json.dumps(h2_data)});
+                            const seriesMacd2 = chartM2.addLineSeries({{ color: '#FFD600', lineWidth: 1, crosshairMarkerVisible: false }});
+                            seriesMacd2.setData({json.dumps(m2_data)});
+                            const seriesSig2 = chartM2.addLineSeries({{ color: '#00E676', lineWidth: 1, crosshairMarkerVisible: false }});
+                            seriesSig2.setData({json.dumps(s2_data)});
 
-                    # 畫入使用者指定的手動水平線
-                    if hline_val > 0:
-                        fig.add_hline(y=hline_val, line_dash="dash", line_color="#2962FF", annotation_text=str(hline_val), annotation_font_color="white", row=1, col=1)
+                            // 時間軸同步
+                            const syncTime = (source, targets) => {{
+                                source.timeScale().subscribeVisibleLogicalRangeChange(range => {{
+                                    if(range) targets.forEach(t => t.timeScale().setVisibleLogicalRange(range));
+                                }});
+                            }};
+                            syncTime(chartMain, [chartM1, chartM2]); syncTime(chartM1, [chartMain, chartM2]); syncTime(chartM2, [chartMain, chartM1]);
 
-                    fig.update_layout(
-                        height=900, margin=dict(l=10, r=10, t=30, b=10),
-                        plot_bgcolor='#131722', paper_bgcolor='#131722', font=dict(color='#d1d4dc'),
-                        showlegend=False, xaxis_rangeslider_visible=False,
-                        # 強制黑底白字高對比
-                        hoverlabel=dict(bgcolor="#111111", font=dict(color="white", size=15), bordercolor="#666666"),
-                        # 保留並增強滑鼠繪圖工具
-                        modebar_add=['drawline', 'drawhline', 'drawrect', 'drawcircle', 'eraseshape'],
-                        dragmode='pan'
-                    )
-                    fig.update_xaxes(showgrid=False, zeroline=False, type='category', showspikes=True, spikemode='across', spikethickness=1, spikedash='dot', spikecolor='#777777') 
-                    fig.update_yaxes(showgrid=False, zeroline=False)
+                            // 十字線同步與 Legend 更新
+                            const legMain = document.getElementById('legend-main'), legM1 = document.getElementById('legend-macd1'), legM2 = document.getElementById('legend-macd2');
+                            
+                            const syncCrosshair = (source, targets, seriesMap) => {{
+                                source.subscribeCrosshairMove(param => {{
+                                    targets.forEach(t => {{ if(param.time) t.setCrosshairPosition(param.seriesPrices.get(seriesMap.get(source)), param.time, source); else t.clearCrosshairPosition(); }});
+                                    
+                                    if(!param.time || param.point.x < 0) return;
+                                    
+                                    const dK = param.seriesPrices.get(seriesK), dV = param.seriesPrices.get(seriesVol);
+                                    if(dK) legMain.innerHTML = `<div class="tv-title">{t4_sid_clean} | {t4_br_name} (${t4_period}) | ${{param.time}}</div>
+                                                                 開: ${{dK.open.toFixed(2)}} | 高: <span style="color:#ef5350">${{dK.high.toFixed(2)}}</span> | 
+                                                                 低: <span style="color:#26a69a">${{dK.low.toFixed(2)}}</span> | 收: <b>${{dK.close.toFixed(2)}}</b><br>
+                                                                 買賣超: <b style="color:${{dV >= 0 ? '#ef5350':'#26a69a'}}">${{dV !== undefined ? dV : 0}}</b>`;
+                                    
+                                    const h1 = param.seriesPrices.get(seriesH1), m1 = param.seriesPrices.get(seriesMacd1), s1 = param.seriesPrices.get(seriesSig1);
+                                    if(m1) legM1.innerHTML = `MACD 短線 | H: <span style="color:${{h1>=0?'#ef5350':'#26a69a'}}">${{h1.toFixed(2)}}</span> | M: <span style="color:#FFD600">${{m1.toFixed(2)}}</span> | S: <span style="color:#00E676">${{s1.toFixed(2)}}</span>`;
 
-                    st.plotly_chart(fig, use_container_width=True, config={
-                        'displayModeBar': True, 
-                        'scrollZoom': True,
-                        'displaylogo': False,
-                        'modeBarButtonsToRemove': ['lasso2d', 'select2d'] # 移除容易在手機誤觸的框選放大
-                    })
+                                    const h2 = param.seriesPrices.get(seriesH2), m2 = param.seriesPrices.get(seriesMacd2), s2 = param.seriesPrices.get(seriesSig2);
+                                    if(m2) legM2.innerHTML = `MACD 長線 | H: <span style="color:${{h2>=0?'#ef5350':'#26a69a'}}">${{h2.toFixed(2)}}</span> | M: <span style="color:#FFD600">${{m2.toFixed(2)}}</span> | S: <span style="color:#00E676">${{s2.toFixed(2)}}</span>`;
+                                }});
+                            }};
+                            
+                            const sMap = new Map([[chartMain, seriesK], [chartM1, seriesMacd1], [chartM2, seriesMacd2]]);
+                            syncCrosshair(chartMain, [chartM1, chartM2], sMap); syncCrosshair(chartM1, [chartMain, chartM2], sMap); syncCrosshair(chartM2, [chartMain, chartM1], sMap);
 
-            except Exception as e: st.error(f"繪圖發生錯誤: {e}")
+                            chartMain.timeScale().fitContent(); chartM1.timeScale().fitContent(); chartM2.timeScale().fitContent();
+                            
+                            window.addEventListener('resize', () => {{
+                                chartMain.applyOptions({{width: document.getElementById('pane-main').clientWidth}});
+                                chartM1.applyOptions({{width: document.getElementById('pane-macd1').clientWidth}});
+                                chartM2.applyOptions({{width: document.getElementById('pane-macd2').clientWidth}});
+                            }});
+                        </script>
+                    </body>
+                    </html>
+                    """
+                    components.html(html_code, height=850)
+            except Exception as e: st.error(f"發生錯誤: {e}")
