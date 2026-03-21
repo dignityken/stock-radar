@@ -818,7 +818,7 @@ with tab4:
                     st.session_state.wl_refresh_key += 1
                     st.rerun()
 
-    # 執行繪圖
+   # 執行繪圖
     if draw_btn or st.session_state.auto_draw:
         st.session_state.auto_draw = False 
         
@@ -895,7 +895,7 @@ with tab4:
 
                     hlines_js_array = json.dumps(st.session_state.custom_hlines)
 
-                   html_code = f"""
+                    html_code = f"""
                     <!DOCTYPE html>
                     <html>
                     <head>
@@ -994,7 +994,7 @@ with tab4:
                             seriesS2.setData(rawData.filter(d => d.s2 !== undefined).map(d => ({{time: d.time, value: d.s2}})));
                             chart.priceScale('m2').applyOptions({{ scaleMargins: {{ top: 0.85, bottom: 0.0 }}, visible: false }});
 
-                            // Streamlit 手動輸入的水平線
+                            // Streamlit 介面輸入的水平線
                             hlines.forEach(val => {{
                                 seriesK.createPriceLine({{
                                     price: val, color: '#2962FF', lineWidth: 2, lineStyle: 2, 
