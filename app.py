@@ -231,6 +231,15 @@ def load_branch_data(url):
     if not content: return ""
     return content.strip().lstrip("'").rstrip("'")
 
+# ==========================================
+# 🌟 補回遺失的全域變數與 Google Drive 連結 🌟
+# ==========================================
+GOOGLE_DRIVE_HQ_DATA_URL = "https://drive.google.com/file/d/112sWHyGbfuNyOEN2M85wIhWtHj1MqKj5/view?usp=drive_link"
+GOOGLE_DRIVE_BRANCH_DATA_URL = "https://drive.google.com/file/d/1C6axJwaHq3SFRslODK8m28WRYFDd90x_/view?usp=drive_link"
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+}
+
 HQ_DATA = load_hq_data(GOOGLE_DRIVE_HQ_DATA_URL)
 FINAL_RAW_DATA_CLEANED = load_branch_data(GOOGLE_DRIVE_BRANCH_DATA_URL)
 
