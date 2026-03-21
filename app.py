@@ -84,21 +84,23 @@ for tab in ['t1', 't2', 't3']:
     if f'{tab}_buy_df' not in st.session_state: st.session_state[f'{tab}_buy_df'] = pd.DataFrame()
     if f'{tab}_sell_df' not in st.session_state: st.session_state[f'{tab}_sell_df'] = pd.DataFrame()
 
-if 't4_sid_ui' not in st.session_state: st.session_state.t4_sid_ui = "6488"
-if 't4_br_ui' not in st.session_state: st.session_state.t4_br_ui = "兆豐-忠孝"
+# ⚠️ 修正重點 1：直接初始化綁定元件的 key，並捨棄舊的變數
+if 't4_sid_input' not in st.session_state: st.session_state.t4_sid_input = "6488"
+if 't4_br_input' not in st.session_state: st.session_state.t4_br_input = "兆豐-忠孝"
 if 'auto_draw' not in st.session_state: st.session_state.auto_draw = False
 if 'watchlist' not in st.session_state: st.session_state.watchlist = []
 if 'custom_hlines' not in st.session_state: st.session_state.custom_hlines = []
 
 def send_to_tab4(sid, br_name):
-    st.session_state.t4_sid_ui = sid
+    st.session_state.t4_sid_input = sid
     clean_br = br_name.replace("亚","亞").strip()
     if clean_br in BROKER_MAP:
-        st.session_state.t4_br_ui = clean_br
+        st.session_state.t4_br_input = clean_br
     st.session_state.auto_draw = True
+    st.rerun() # ⚠️ 強制重新整理以立即套用狀態並執行 Tab 4
 
 # ==========================================
-# 資料載入與處理函數
+# 資料載入與處理函數 (與原版相同)
 # ==========================================
 @st.cache_data(ttl=3600) 
 def download_google_drive_file(url):
@@ -210,30 +212,12 @@ def get_stock_kline(stock_id):
             return df
     return pd.DataFrame()
 
-@st.cache_data(ttl=1800)
-def get_fubon_history(sid, br_id):
-    today_str = datetime.date.today().strftime('%Y-%m-%d')
-    url_history = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?A={sid}&BHID={br_id}&b={br_id}&C=3&D=1999-1-1&E={today_str}&ver=V3"
-    res_hist = requests.get(url_history, headers=HEADERS, verify=False, timeout=20)
-    res_hist.encoding = 'big5'
-    tables = pd.read_html(StringIO(res_hist.text))
-    for tb in tables:
-        if tb.shape[1] == 5 and '日期' in str(tb.iloc[0].values):
-            df_broker = tb.copy()
-            df_broker.columns = ['Date', '買進', '賣出', '總額', '買賣超']
-            df_broker = df_broker.drop(0) 
-            df_broker = df_broker[~df_broker['Date'].str.contains('日期|合計|說明', na=False)].copy()
-            df_broker['Date'] = pd.to_datetime(df_broker['Date'].astype(str).str.replace(' ', ''))
-            df_broker['買賣超'] = pd.to_numeric(df_broker['買賣超'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-            return df_broker
-    return pd.DataFrame(columns=['Date', '買賣超'])
-
 def safe_float(val):
     if pd.isna(val): return None
     return float(val)
 
 # ==========================================
-# 1. UI 介面設定
+# UI 介面設定
 # ==========================================
 tab1, tab2, tab3, tab4 = st.tabs(["🚀 特定分點", "📊 股票代號", "📍 地緣券商", "📊 主力 K 線圖"])
 
@@ -306,7 +290,6 @@ with tab1:
             else: st.warning("無資料。")
         except Exception as e: st.error(f"發生錯誤: {e}")
 
-    # 顯示區塊 (不受按鈕重整影響)
     if st.session_state.t1_searched:
         def display_table_with_button(df_to_show, key_prefix):
             if not df_to_show.empty:
@@ -331,7 +314,6 @@ with tab1:
                 if not clicked_rows.empty:
                     sid_clicked = clicked_rows.iloc[0]['extracted_stock_id']
                     send_to_tab4(sid_clicked, sel_br_l)
-                    st.success(f"✅ 已設定！請點擊上方「📊 主力 K 線圖」。")
 
         col_b = '買進金額' if '金額' in t1_u else '買進張數'
         col_s = '賣出金額' if '金額' in t1_u else '賣出張數'
@@ -413,7 +395,6 @@ with tab2:
                 if not clicked_rows.empty:
                     br_clicked = clicked_rows.iloc[0]['券商']
                     send_to_tab4(t2_sid_clean, br_clicked)
-                    st.success(f"✅ 參數已設定！請點擊上方「📊 主力 K 線圖」。")
 
         st.subheader("🔴 吃貨主力分點")
         display_table_with_button_t2(st.session_state.t2_buy_df.sort_values('買', ascending=False).head(999 if show_full_t2 else 10), "t2_buy")
@@ -511,7 +492,6 @@ with tab3:
                 if not clicked_rows.empty:
                     sid_clicked = clicked_rows.iloc[0]['extracted_stock_id']
                     send_to_tab4(sid_clicked, sel_t3_br_l)
-                    st.success(f"✅ 參數已設定！請點擊上方「📊 主力 K 線圖」。")
 
         col_b = '買進金額' if '金額' in t3_u else '買進張數'
         col_s = '賣出金額' if '金額' in t3_u else '賣出張數'
@@ -520,16 +500,15 @@ with tab3:
         st.markdown(f"### 🟢 該分點倒貨中 - 共 {len(st.session_state.t3_sell_df)} 檔")
         display_table_with_button_t3(st.session_state.t3_sell_df.sort_values(by=col_s, ascending=False).head(999 if show_full_t3 else 10), "t3_sell")
 
-# --- Tab 4 (TradingView 輕量版 保底防崩潰版) ---
+# --- Tab 4 (主力 K 線圖) ---
 with tab4:
     col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns([1, 1.5, 1, 1, 1])
+    # ⚠️ 修正重點 2：這裡直接綁定 key，不再給 value 或 index。狀態由程式管理。
     with col_t1:
-        t4_sid = st.text_input("股票代號", st.session_state.t4_sid_ui, key="t4_sid_input")
+        t4_sid = st.text_input("股票代號", key="t4_sid_input")
     with col_t2:
         all_br_names = sorted(list(BROKER_MAP.keys()))
-        passed_br = st.session_state.t4_br_ui
-        default_br_idx = all_br_names.index(passed_br) if passed_br in all_br_names else 0
-        t4_br_name = st.selectbox("搜尋分點", all_br_names, index=default_br_idx, key="t4_br_input")
+        t4_br_name = st.selectbox("搜尋分點", all_br_names, key="t4_br_input")
     with col_t3: 
         t4_period = st.radio("週期", ["日", "週", "月"], horizontal=True)
     with col_t4: 
@@ -593,7 +572,6 @@ with tab4:
             
             if not edited_wl[edited_wl['載入'] == True].empty:
                 send_to_tab4(edited_wl[edited_wl['載入'] == True].iloc[0]['股票代號'], edited_wl[edited_wl['載入'] == True].iloc[0]['追蹤分點'])
-                st.rerun() 
             if not edited_wl[edited_wl['刪除'] == True].empty:
                 del_sid = edited_wl[edited_wl['刪除'] == True].iloc[0]['股票代號']
                 del_br = edited_wl[edited_wl['刪除'] == True].iloc[0]['追蹤分點']
@@ -637,7 +615,7 @@ with tab4:
                     
                     df_merged.set_index('Date', inplace=True)
                     if t4_period == "週": df_resampled = df_merged.resample('W-FRI').agg({'Open':'first', 'High':'max', 'Low':'min', 'Close':'last', '買賣超':'sum'})
-                    elif t4_period == "月": df_resampled = df_merged.resample('M').agg({'Open':'first', 'High':'max', 'Low':'min', 'Close':'last', '買賣超':'sum'})
+                    elif t4_period == "月": df_resampled = df_merged.resample('ME').agg({'Open':'first', 'High':'max', 'Low':'min', 'Close':'last', '買賣超':'sum'})
                     else: df_resampled = df_merged.copy()
                     
                     df_resampled = df_resampled.dropna(subset=['Close']).reset_index()
@@ -651,7 +629,6 @@ with tab4:
                     macd1, sig1, hist1 = calculate_macd(df_resampled, int(macd1_f), int(macd1_s), int(macd1_sig))
                     macd2, sig2, hist2 = calculate_macd(df_resampled, int(macd2_f), int(macd2_s), int(macd2_sig))
                     
-                    # 💡 關鍵解法：將所有指標疊加到同一個 Dataframe 統一處理，丟棄全部副圖
                     df_plot = df_resampled.tail(int(t4_days)).copy()
                     
                     df_plot['M1_hist'] = hist1.tail(int(t4_days))
@@ -662,7 +639,6 @@ with tab4:
                     df_plot['M2_macd'] = macd2.tail(int(t4_days))
                     df_plot['M2_sig'] = sig2.tail(int(t4_days))
 
-                    # 轉化為 JS 陣列
                     all_data = []
                     for i, row in df_plot.iterrows():
                         if pd.isna(row['Close']): continue
@@ -689,6 +665,7 @@ with tab4:
 
                     hlines_js_array = json.dumps(st.session_state.custom_hlines)
 
+                    # ⚠️ 修正重點 3：加入了 wrapper 外層隔離 Canvas 覆蓋、改用原生的 layout.watermark、修正套件時間對象解析錯誤
                     html_code = f"""
                     <!DOCTYPE html>
                     <html>
@@ -697,16 +674,11 @@ with tab4:
                         <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
                         <style>
                             body {{ margin: 0; padding: 0; background-color: #131722; overflow: hidden; font-family: "Microsoft JhengHei", sans-serif; }}
-                            #chart {{ width: 100vw; height: 95vh; position: relative; }}
-                            
-                            .tv-watermark {{
-                                position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%);
-                                font-size: 80px; font-weight: bold; color: rgba(255, 255, 255, 0.06);
-                                z-index: 1; pointer-events: none; white-space: nowrap; letter-spacing: 4px;
-                            }}
+                            #wrapper {{ position: relative; width: 100vw; height: 95vh; }}
+                            #chart {{ width: 100%; height: 100%; }}
                             
                             .tv-legend {{
-                                position: absolute; left: 12px; top: 12px; z-index: 100; font-size: 13px; color: #d1d4dc; 
+                                position: absolute; left: 12px; top: 12px; z-index: 999; font-size: 13px; color: #d1d4dc; 
                                 pointer-events: none; background: rgba(19, 23, 34, 0.85); padding: 8px 12px; 
                                 border-radius: 6px; border: 1px solid #363c4e; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
                             }}
@@ -718,15 +690,27 @@ with tab4:
                         </style>
                     </head>
                     <body>
-                        <div id="chart">
-                            <div class="tv-watermark">{t4_sid_clean} {stock_name}</div>
+                        <div id="wrapper">
+                            <div id="chart"></div>
                             <div id="legend" class="tv-legend">將滑鼠移至 K 線上查看數據</div>
                         </div>
                         <script>
                             const rawData = {json.dumps(all_data)};
                             const hlines = {hlines_js_array};
                             
-                            const layoutOptions = {{ layout: {{ backgroundColor: '#131722', textColor: '#d1d4dc' }}, grid: {{ vertLines: {{ color: '#242733' }}, horzLines: {{ color: '#242733' }} }}, crosshair: {{ mode: LightweightCharts.CrosshairMode.Normal }} }};
+                            const layoutOptions = {{ 
+                                layout: {{ backgroundColor: '#131722', textColor: '#d1d4dc' }},
+                                watermark: {{
+                                    color: 'rgba(255, 255, 255, 0.08)',
+                                    visible: true,
+                                    text: '{t4_sid_clean} {stock_name}',
+                                    fontSize: 80,
+                                    horzAlign: 'center',
+                                    vertAlign: 'center',
+                                }},
+                                grid: {{ vertLines: {{ color: '#242733' }}, horzLines: {{ color: '#242733' }} }}, 
+                                crosshair: {{ mode: LightweightCharts.CrosshairMode.Normal }} 
+                            }};
                             const chart = LightweightCharts.createChart(document.getElementById('chart'), layoutOptions);
                             
                             // K線
@@ -741,11 +725,11 @@ with tab4:
                             const bbDn = chart.addLineSeries({{ color: 'rgba(255, 255, 255, 0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             bbDn.setData(rawData.filter(d => d.bbd !== undefined).map(d => ({{time: d.time, value: d.bbd}})));
                             
-                            // 買賣超 (放在主圖下方 15%)
+                            // 買賣超
                             const seriesVol = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: '', scaleMargins: {{ top: 0.85, bottom: 0 }}, lastValueVisible: false, priceLineVisible: false }});
                             seriesVol.setData(rawData.map(d => ({{time: d.time, value: d.vol, color: d.vol >= 0 ? 'rgba(239, 83, 80, 0.8)' : 'rgba(38, 166, 154, 0.8)'}})));
                             
-                            // MACD 短線 (放在主圖下方 15%~30%)
+                            // MACD 短線
                             const seriesH1 = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'm1', scaleMargins: {{ top: 0.7, bottom: 0.15 }}, lastValueVisible: false, priceLineVisible: false }});
                             seriesH1.setData(rawData.filter(d => d.h1 !== undefined).map(d => ({{time: d.time, value: d.h1, color: d.h1 >= 0 ? 'rgba(239, 83, 80, 0.5)' : 'rgba(38, 166, 154, 0.5)'}})));
                             const seriesM1 = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, priceScaleId: 'm1', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
@@ -753,7 +737,7 @@ with tab4:
                             const seriesS1 = chart.addLineSeries({{ color: '#00E676', lineWidth: 1, priceScaleId: 'm1', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             seriesS1.setData(rawData.filter(d => d.s1 !== undefined).map(d => ({{time: d.time, value: d.s1}})));
 
-                            // MACD 長線 (放在主圖下方 30%~45%)
+                            // MACD 長線
                             const seriesH2 = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'm2', scaleMargins: {{ top: 0.55, bottom: 0.3 }}, lastValueVisible: false, priceLineVisible: false }});
                             seriesH2.setData(rawData.filter(d => d.h2 !== undefined).map(d => ({{time: d.time, value: d.h2, color: d.h2 >= 0 ? 'rgba(239, 83, 80, 0.5)' : 'rgba(38, 166, 154, 0.5)'}})));
                             const seriesM2 = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, priceScaleId: 'm2', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
@@ -761,30 +745,36 @@ with tab4:
                             const seriesS2 = chart.addLineSeries({{ color: '#00E676', lineWidth: 1, priceScaleId: 'm2', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             seriesS2.setData(rawData.filter(d => d.s2 !== undefined).map(d => ({{time: d.time, value: d.s2}})));
 
-                            // 隱藏副圖的 Y 軸
                             chart.priceScale('m1').applyOptions({{ visible: false }});
                             chart.priceScale('m2').applyOptions({{ visible: false }});
 
-                            // 水平線
                             hlines.forEach(val => {{
                                 const hline = chart.addLineSeries({{ color: '#2962FF', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, priceLineVisible: true, lastValueVisible: false }});
                                 hline.setData(rawData.map(d => ({{time: d.time, value: val}})));
                             }});
 
-                            // 超完美置頂資料窗
                             const legend = document.getElementById('legend');
-                            const getDayOfWeek = (d) => ['週日', '週一', '週二', '週三', '週四', '週五', '週六'][new Date(d).getDay()];
+                            const getDayOfWeek = (dStr) => ['週日', '週一', '週二', '週三', '週四', '週五', '週六'][new Date(dStr).getDay()];
                             const dictByTime = {{}}; rawData.forEach(d => dictByTime[d.time] = d);
 
                             chart.subscribeCrosshairMove(param => {{
-                                if(!param.time || !dictByTime[param.time] || param.point.x < 0 || param.point.y < 0) {{
+                                if(!param.time || param.point === undefined || param.point.x < 0 || param.point.y < 0) {{
                                     legend.innerHTML = '將滑鼠移至 K 線上查看數據'; return;
                                 }}
-                                const d = dictByTime[param.time];
+                                
+                                // 解析圖表回傳的可能為 Object 的 Time 格式
+                                let timeStr = param.time;
+                                if (typeof timeStr === 'object' && timeStr.year) {{
+                                    timeStr = timeStr.year + '-' + String(timeStr.month).padStart(2, '0') + '-' + String(timeStr.day).padStart(2, '0');
+                                }}
+
+                                const d = dictByTime[timeStr] || dictByTime[param.time];
+                                if(!d) return;
+
                                 const vColor = d.vol >= 0 ? '#ef5350' : '#26a69a';
                                 
                                 let html = `
-                                    <div class="lg-title">{t4_sid_clean} {stock_name} | ${{param.time}} ${{getDayOfWeek(param.time)}}</div>
+                                    <div class="lg-title">{t4_sid_clean} {stock_name} | ${{timeStr}} ${{getDayOfWeek(timeStr)}}</div>
                                     <div class="lg-row"><span class="lg-label">開盤</span><span style="color:white;">${{d.open.toFixed(2)}}</span></div>
                                     <div class="lg-row"><span class="lg-label">最高</span><span style="color:#ef5350;">${{d.high.toFixed(2)}}</span></div>
                                     <div class="lg-row"><span class="lg-label">最低</span><span style="color:#26a69a;">${{d.low.toFixed(2)}}</span></div>
@@ -799,7 +789,12 @@ with tab4:
                             }});
 
                             chart.timeScale().fitContent();
-                            window.addEventListener('resize', () => {{ chart.applyOptions({{width: document.getElementById('chart').clientWidth, height: document.getElementById('chart').clientHeight}}); }});
+                            window.addEventListener('resize', () => {{ 
+                                chart.applyOptions({{
+                                    width: document.getElementById('wrapper').clientWidth, 
+                                    height: document.getElementById('wrapper').clientHeight
+                                }}); 
+                            }});
                         </script>
                     </body>
                     </html>
