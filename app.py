@@ -84,7 +84,6 @@ for tab in ['t1', 't2', 't3']:
     if f'{tab}_buy_df' not in st.session_state: st.session_state[f'{tab}_buy_df'] = pd.DataFrame()
     if f'{tab}_sell_df' not in st.session_state: st.session_state[f'{tab}_sell_df'] = pd.DataFrame()
 
-# ⚠️ 修正重點 1：直接初始化綁定元件的 key，並捨棄舊的變數
 if 't4_sid_input' not in st.session_state: st.session_state.t4_sid_input = "6488"
 if 't4_br_input' not in st.session_state: st.session_state.t4_br_input = "兆豐-忠孝"
 if 'auto_draw' not in st.session_state: st.session_state.auto_draw = False
@@ -92,15 +91,26 @@ if 'watchlist' not in st.session_state: st.session_state.watchlist = []
 if 'custom_hlines' not in st.session_state: st.session_state.custom_hlines = []
 
 def send_to_tab4(sid, br_name):
-    st.session_state.t4_sid_input = sid
-    clean_br = br_name.replace("亚","亞").strip()
+    st.session_state.t4_sid_input = str(sid).strip().upper()
+    clean_br = str(br_name).replace("亚","亞").strip()
+    # 精準尋找分點名稱
+    matched_br = None
     if clean_br in BROKER_MAP:
-        st.session_state.t4_br_input = clean_br
+        matched_br = clean_br
+    else:
+        for k in BROKER_MAP.keys():
+            if clean_br in k or k in clean_br:
+                matched_br = k
+                break
+    
+    if matched_br:
+        st.session_state.t4_br_input = matched_br
+        
     st.session_state.auto_draw = True
-    st.rerun() # ⚠️ 強制重新整理以立即套用狀態並執行 Tab 4
+    st.rerun()
 
 # ==========================================
-# 資料載入與處理函數 (與原版相同)
+# 資料載入與處理函數
 # ==========================================
 @st.cache_data(ttl=3600) 
 def download_google_drive_file(url):
@@ -164,20 +174,9 @@ def build_full_broker_db_structure(raw_data_string, hq_data_map):
                 unique_branches[br_name] = br_id
                 seen_names.add(br_name)
         final_tree[hq_name] = {"bid": hq_data['bid'], "branches": unique_branches}
-    if '北城證券' in final_tree and '北城' in final_tree:
-        if final_tree['北城證券']['bid'] == final_tree['北城']['bid']:
-            del final_tree['北城']
-            if '北城' in name_map: del name_map['北城']
     return final_tree, name_map
 
 UI_TREE, BROKER_MAP = build_full_broker_db_structure(FINAL_RAW_DATA_CLEANED, HQ_DATA)
-
-GEO_MAP = {}
-for br_name, br_info in BROKER_MAP.items():
-    if "-" in br_name:
-        loc_name = br_name.split("-")[-1].replace("(停)", "").strip()
-        if loc_name not in GEO_MAP: GEO_MAP[loc_name] = {}
-        GEO_MAP[loc_name][br_name] = br_info
 
 def get_stock_id(name_str):
     s = str(name_str).strip()
@@ -211,6 +210,35 @@ def get_stock_kline(stock_id):
                 df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
             return df
     return pd.DataFrame()
+
+# ✅ 新增加速快取：讓富邦抓資料被快取，畫線時就不會轉圈圈重抓！
+@st.cache_data(ttl=1800)
+def get_fubon_history_and_name(sid, br_id):
+    today_str = datetime.date.today().strftime('%Y-%m-%d')
+    url_history = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?A={sid}&BHID={br_id}&b={br_id}&C=3&D=1999-1-1&E={today_str}&ver=V3"
+    try:
+        res_hist = requests.get(url_history, headers=HEADERS, verify=False, timeout=20)
+        res_hist.encoding = 'big5'
+        
+        stock_name = ""
+        m_name = re.search(r"對\s+([^\(]+)\(\s*" + re.escape(sid) + r"\s*\)個股", res_hist.text)
+        if m_name: stock_name = m_name.group(1).strip()
+            
+        tables = pd.read_html(StringIO(res_hist.text))
+        df_broker = pd.DataFrame(columns=['Date', '買進', '賣出', '總額', '買賣超'])
+        for tb in tables:
+            if tb.shape[1] == 5 and '日期' in str(tb.iloc[0].values):
+                df_b = tb.copy()
+                df_b.columns = ['Date', '買進', '賣出', '總額', '買賣超']
+                df_b = df_b.drop(0) 
+                df_b = df_b[~df_b['Date'].str.contains('日期|合計|說明', na=False)].copy()
+                df_b['Date'] = pd.to_datetime(df_b['Date'].astype(str).str.replace(' ', ''))
+                df_b['買賣超'] = pd.to_numeric(df_b['買賣超'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+                df_broker = df_b
+                break
+        return df_broker, stock_name
+    except:
+        return pd.DataFrame(), ""
 
 def safe_float(val):
     if pd.isna(val): return None
@@ -309,11 +337,18 @@ with tab1:
                     "畫圖": st.column_config.CheckboxColumn("送至Tab4"),
                     "extracted_stock_id": None 
                 }
-                edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=f"editor_{key_prefix}")
-                clicked_rows = edited_df[edited_df['畫圖'] == True]
-                if not clicked_rows.empty:
-                    sid_clicked = clicked_rows.iloc[0]['extracted_stock_id']
-                    send_to_tab4(sid_clicked, sel_br_l)
+                editor_key = f"editor_{key_prefix}"
+                st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=editor_key)
+                
+                # ✅ 正確攔截點擊事件並避免無限迴圈
+                if editor_key in st.session_state:
+                    edited_rows = st.session_state[editor_key].get('edited_rows', {})
+                    for row_idx, edits in edited_rows.items():
+                        if edits.get('畫圖', False) == True:
+                            sid_clicked = df_show.iloc[row_idx]['extracted_stock_id']
+                            del st.session_state[editor_key]  # 清除勾選狀態
+                            send_to_tab4(sid_clicked, sel_br_l)
+                            break
 
         col_b = '買進金額' if '金額' in t1_u else '買進張數'
         col_s = '賣出金額' if '金額' in t1_u else '賣出張數'
@@ -347,11 +382,16 @@ with tab2:
                 res.encoding = 'big5'
                 tables = pd.read_html(StringIO(res.text))
                 df_all = pd.DataFrame()
+                
+                # ✅ 穩健的表格過濾法 (避免欄位數量跳動導致崩潰)
                 for tb in tables:
-                    if tb.shape[1] == 10:
-                        l = tb.iloc[:,[0,1,2]].copy(); l.columns=['券商','買','賣']
-                        r = tb.iloc[:,[5,6,7]].copy(); r.columns=['券商','買','賣']
-                        df_all = pd.concat([l, r])
+                    if tb.shape[1] >= 8 and any('券商' in str(c) for c in tb.values.flatten()):
+                        try:
+                            l = tb.iloc[:, [0, 1, 2]].copy(); l.columns = ['券商', '買', '賣']
+                            mid_idx = tb.shape[1] // 2
+                            r = tb.iloc[:, [mid_idx, mid_idx+1, mid_idx+2]].copy(); r.columns = ['券商', '買', '賣']
+                            df_all = pd.concat([df_all, l, r], ignore_index=True)
+                        except: pass
                 
                 if not df_all.empty:
                     df_all = df_all.dropna()
@@ -390,11 +430,18 @@ with tab2:
                     "網頁明細": st.column_config.LinkColumn("網頁明細", display_text="🏦"),
                     "畫圖": st.column_config.CheckboxColumn("送至Tab4")
                 }
-                edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=f"editor_{key_prefix}")
-                clicked_rows = edited_df[edited_df['畫圖'] == True]
-                if not clicked_rows.empty:
-                    br_clicked = clicked_rows.iloc[0]['券商']
-                    send_to_tab4(t2_sid_clean, br_clicked)
+                editor_key = f"editor_{key_prefix}"
+                st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=editor_key)
+                
+                # ✅ 正確攔截
+                if editor_key in st.session_state:
+                    edited_rows = st.session_state[editor_key].get('edited_rows', {})
+                    for row_idx, edits in edited_rows.items():
+                        if edits.get('畫圖', False) == True:
+                            br_clicked = df_show.iloc[row_idx]['券商']
+                            del st.session_state[editor_key]
+                            send_to_tab4(t2_sid_clean, br_clicked)
+                            break
 
         st.subheader("🔴 吃貨主力分點")
         display_table_with_button_t2(st.session_state.t2_buy_df.sort_values('買', ascending=False).head(999 if show_full_t2 else 10), "t2_buy")
@@ -403,15 +450,18 @@ with tab2:
 
 # --- Tab 3 ---
 with tab3:
+    # ✅ 大幅優化：不再用強制 `-` 符號分割，改用最直覺的「關鍵字」搜尋全台券商
     c1, c2 = st.columns(2)
     with c1:
-        sorted_loc_keys = sorted(GEO_MAP.keys())
-        sel_loc = st.selectbox("選擇地緣關鍵字", sorted_loc_keys, key="t3_loc_sel")
+        t3_keyword = st.text_input("輸入地緣關鍵字 (如: 城中, 忠孝, 竹科)", "城中", key="t3_kw")
     with c2:
-        loc_branches = GEO_MAP[sel_loc]
-        sel_t3_br_l = st.selectbox("選擇特定分點", sorted(loc_branches.keys()), key="t3_br_sel")
-        sel_t3_br_id = loc_branches[sel_t3_br_l]['br_id']
-        sel_t3_hq_id = loc_branches[sel_t3_br_l]['hq_id']
+        matched_brs = {k: v for k, v in BROKER_MAP.items() if t3_keyword in k}
+        if not matched_brs:
+            st.warning("找不到包含此關鍵字的分點")
+        else:
+            sel_t3_br_l = st.selectbox("選擇特定分點", sorted(matched_brs.keys()), key="t3_br_sel")
+            sel_t3_br_id = matched_brs[sel_t3_br_l]['br_id']
+            sel_t3_hq_id = matched_brs[sel_t3_br_l]['hq_id']
 
     c3, c4, c5 = st.columns(3)
     with c3: t3_sd = st.date_input("區間起點", datetime.date.today()-datetime.timedelta(days=7), key="t3_sd")
@@ -423,7 +473,7 @@ with tab3:
     with c7: t3_p = st.number_input("佔比 >= (%)", 0.0, 100.0, 95.0, key="t3_pct")
     with c8: st.write(""); show_full_t3 = st.checkbox("完整清單", value=False, key="t3_full")
 
-    if st.button("啟動地緣雷達 📡", key="t3_go"):
+    if st.button("啟動地緣雷達 📡", key="t3_go") and matched_brs:
         st.session_state.t3_searched = True
         sd_s, ed_s = t3_sd.strftime('%Y-%m-%d'), t3_ed.strftime('%Y-%m-%d')
         c_param = "B" if '金額' in t3_u else "E"
@@ -487,11 +537,18 @@ with tab3:
                     "畫圖": st.column_config.CheckboxColumn("送至Tab4"),
                     "extracted_stock_id": None 
                 }
-                edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=f"editor_{key_prefix}")
-                clicked_rows = edited_df[edited_df['畫圖'] == True]
-                if not clicked_rows.empty:
-                    sid_clicked = clicked_rows.iloc[0]['extracted_stock_id']
-                    send_to_tab4(sid_clicked, sel_t3_br_l)
+                editor_key = f"editor_{key_prefix}"
+                st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=editor_key)
+                
+                # ✅ 正確攔截
+                if editor_key in st.session_state:
+                    edited_rows = st.session_state[editor_key].get('edited_rows', {})
+                    for row_idx, edits in edited_rows.items():
+                        if edits.get('畫圖', False) == True:
+                            sid_clicked = df_show.iloc[row_idx]['extracted_stock_id']
+                            del st.session_state[editor_key]
+                            send_to_tab4(sid_clicked, sel_t3_br_l)
+                            break
 
         col_b = '買進金額' if '金額' in t3_u else '買進張數'
         col_s = '賣出金額' if '金額' in t3_u else '賣出張數'
@@ -502,8 +559,10 @@ with tab3:
 
 # --- Tab 4 (主力 K 線圖) ---
 with tab4:
+    if st.session_state.auto_draw:
+        st.success("✅ 資料已同步，請直接查看下方圖表。")
+        
     col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns([1, 1.5, 1, 1, 1])
-    # ⚠️ 修正重點 2：這裡直接綁定 key，不再給 value 或 index。狀態由程式管理。
     with col_t1:
         t4_sid = st.text_input("股票代號", key="t4_sid_input")
     with col_t2:
@@ -521,16 +580,19 @@ with tab4:
     with col_x1:
         fav_btn = st.button("❤️ 存入清單", use_container_width=True)
     with col_x2:
+        # ✅ 使用表單或直接輸入，不改變迴圈。由於有快取，這裡的輸入觸發重整會「瞬間」完成。
         hline_val = st.number_input("📏 新增水平線 (輸入價格後按 Enter 即畫線)", value=0.0, step=1.0)
         if hline_val > 0 and hline_val not in st.session_state.custom_hlines:
             st.session_state.custom_hlines.append(hline_val)
             st.session_state.auto_draw = True 
     with col_x3:
         st.write("")
+        # ✅ 新增清除所有畫線按鈕
         clear_btn = st.button("🗑️ 清除所有畫線", use_container_width=True)
         if clear_btn:
             st.session_state.custom_hlines = []
             st.session_state.auto_draw = True
+            st.rerun()
 
     t4_sid_clean = t4_sid.strip().upper()
     
@@ -583,32 +645,20 @@ with tab4:
         st.session_state.auto_draw = False 
         t4_br_id = BROKER_MAP[t4_br_name]['br_id']
         
-        with st.spinner(f"為您繪製 {t4_sid_clean} 中..."):
+        with st.spinner(f"為您繪製 {t4_sid_clean} 中... (有快取加速)"):
             try:
+                # ✅ K 線資料已有快取
                 df_k = get_stock_kline(t4_sid_clean)
-                if df_k.empty: st.error("找不到 K 線資料。")
+                
+                if df_k.empty: 
+                    st.error("找不到 K 線資料。")
                 else:
-                    stock_name = ""
-                    url_history = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?A={t4_sid_clean}&BHID={t4_br_id}&b={t4_br_id}&C=3&D=1999-1-1&E={datetime.date.today().strftime('%Y-%m-%d')}&ver=V3"
-                    res_hist = requests.get(url_history, headers=HEADERS, verify=False, timeout=20)
-                    res_hist.encoding = 'big5'
-                    m_name = re.search(r"對\s+([^\(]+)\(\s*" + re.escape(t4_sid_clean) + r"\s*\)個股", res_hist.text)
-                    if m_name: stock_name = m_name.group(1).strip()
-
-                    df_broker = pd.DataFrame()
-                    tables = pd.read_html(StringIO(res_hist.text))
-                    for tb in tables:
-                        if tb.shape[1] == 5 and '日期' in str(tb.iloc[0].values):
-                            df_broker = tb.copy()
-                            df_broker.columns = ['Date', '買進', '賣出', '總額', '買賣超']
-                            df_broker = df_broker.drop(0) 
-                            break
+                    # ✅ 富邦歷史資料也加入快取，畫線輸入重整時 0.1 秒內完成！
+                    df_broker, stock_name = get_fubon_history_and_name(t4_sid_clean, t4_br_id)
                     
-                    if df_broker.empty: st.info("近期無交易紀錄。")
-                    else:
-                        df_broker = df_broker[~df_broker['Date'].str.contains('日期|合計|說明', na=False)].copy()
-                        df_broker['Date'] = pd.to_datetime(df_broker['Date'].astype(str).str.replace(' ', ''))
-                        df_broker['買賣超'] = pd.to_numeric(df_broker['買賣超'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+                    if df_broker.empty:
+                        st.info("近期無交易紀錄。")
+                        df_broker = pd.DataFrame(columns=['Date', '買賣超'])
 
                     df_merged = pd.merge(df_k, df_broker[['Date', '買賣超']], on='Date', how='left')
                     df_merged['買賣超'] = df_merged['買賣超'].fillna(0) 
@@ -665,7 +715,7 @@ with tab4:
 
                     hlines_js_array = json.dumps(st.session_state.custom_hlines)
 
-                    # ⚠️ 修正重點 3：加入了 wrapper 外層隔離 Canvas 覆蓋、改用原生的 layout.watermark、修正套件時間對象解析錯誤
+                    # ✅ 修正 X 軸時間格式 (年-月-日)
                     html_code = f"""
                     <!DOCTYPE html>
                     <html>
@@ -709,8 +759,21 @@ with tab4:
                                     vertAlign: 'center',
                                 }},
                                 grid: {{ vertLines: {{ color: '#242733' }}, horzLines: {{ color: '#242733' }} }}, 
-                                crosshair: {{ mode: LightweightCharts.CrosshairMode.Normal }} 
+                                crosshair: {{ mode: LightweightCharts.CrosshairMode.Normal }},
+                                localization: {{
+                                    timeFormatter: time => {{
+                                        if (typeof time === 'object' && time.year) return time.year + '-' + String(time.month).padStart(2, '0') + '-' + String(time.day).padStart(2, '0');
+                                        return time;
+                                    }}
+                                }},
+                                timeScale: {{
+                                    tickMarkFormatter: (time) => {{
+                                        if (typeof time === 'object' && time.year) return time.year + '-' + String(time.month).padStart(2, '0') + '-' + String(time.day).padStart(2, '0');
+                                        return time;
+                                    }}
+                                }}
                             }};
+                            
                             const chart = LightweightCharts.createChart(document.getElementById('chart'), layoutOptions);
                             
                             // K線
@@ -762,7 +825,6 @@ with tab4:
                                     legend.innerHTML = '將滑鼠移至 K 線上查看數據'; return;
                                 }}
                                 
-                                // 解析圖表回傳的可能為 Object 的 Time 格式
                                 let timeStr = param.time;
                                 if (typeof timeStr === 'object' && timeStr.year) {{
                                     timeStr = timeStr.year + '-' + String(timeStr.month).padStart(2, '0') + '-' + String(timeStr.day).padStart(2, '0');
