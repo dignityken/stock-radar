@@ -15,12 +15,6 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="籌碼雷達", layout="wide")
 
-# --- 🚀 核心函數：處理 NaN 並確保 JS 不崩潰 ---
-def safe_float(val):
-    if pd.isna(val):
-        return None
-    return float(val)
-
 # ==========================================
 # 🔒 進入門檻：通行密碼與免登書籤系統
 # ==========================================
@@ -63,8 +57,7 @@ def check_password():
         else:
             st.session_state["password_correct"] = False
 
-    if st.session_state.get("password_correct") == True:
-        return True
+    if st.session_state.get("password_correct") == True: return True
 
     st.markdown("<br><br><h1 style='text-align: center;'>🔒 籌碼雷達</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center;'>成功登入後，將網址加入書籤即可免重複輸入密碼。</p>", unsafe_allow_html=True)
@@ -73,28 +66,23 @@ def check_password():
     with col2:
         st.text_input("輸入通行密碼：", type="password", on_change=password_entered, key="pwd_input")
         status = st.session_state.get("password_correct")
-        if status == False:
-            st.error("🚫 密碼錯誤")
-        elif status == "expired":
-            st.warning("⚠️ 會員權限已到期，請洽管理員。")
+        if status == False: st.error("🚫 密碼錯誤")
+        elif status == "expired": st.warning("⚠️ 會員權限已到期，請洽管理員。")
     return False
 
 if not check_password(): st.stop()  
 
 # ==========================================
-# 初始化與數據載入
+# 初始化全域變數與 Session State
 # ==========================================
 HEADERS = {"User-Agent": "Mozilla/5.0"} 
 GOOGLE_DRIVE_HQ_DATA_URL = "https://drive.google.com/file/d/112sWHyGbfuNyOEN2M85wIhWtHj1MqKj5/view?usp=drivesdk"
 GOOGLE_DRIVE_BRANCH_DATA_URL = "https://drive.google.com/file/d/1C6axJwaHq3SFRslODK8m28WRYFDd90x_/view?usp=drivesdk"
 
 for tab in ['t1', 't2', 't3']:
-    if f'{tab}_searched' not in st.session_state:
-        st.session_state[f'{tab}_searched'] = False
-    if f'{tab}_buy_df' not in st.session_state:
-        st.session_state[f'{tab}_buy_df'] = pd.DataFrame()
-    if f'{tab}_sell_df' not in st.session_state:
-        st.session_state[f'{tab}_sell_df'] = pd.DataFrame()
+    if f'{tab}_searched' not in st.session_state: st.session_state[f'{tab}_searched'] = False
+    if f'{tab}_buy_df' not in st.session_state: st.session_state[f'{tab}_buy_df'] = pd.DataFrame()
+    if f'{tab}_sell_df' not in st.session_state: st.session_state[f'{tab}_sell_df'] = pd.DataFrame()
 
 if 't4_sid_ui' not in st.session_state: st.session_state.t4_sid_ui = "6488"
 if 't4_br_ui' not in st.session_state: st.session_state.t4_br_ui = "兆豐-忠孝"
@@ -109,6 +97,9 @@ def send_to_tab4(sid, br_name):
         st.session_state.t4_br_ui = clean_br
     st.session_state.auto_draw = True
 
+# ==========================================
+# 資料載入與處理函數
+# ==========================================
 @st.cache_data(ttl=3600) 
 def download_google_drive_file(url):
     file_id = url.split('/')[-2] 
@@ -171,6 +162,10 @@ def build_full_broker_db_structure(raw_data_string, hq_data_map):
                 unique_branches[br_name] = br_id
                 seen_names.add(br_name)
         final_tree[hq_name] = {"bid": hq_data['bid'], "branches": unique_branches}
+    if '北城證券' in final_tree and '北城' in final_tree:
+        if final_tree['北城證券']['bid'] == final_tree['北城']['bid']:
+            del final_tree['北城']
+            if '北城' in name_map: del name_map['北城']
     return final_tree, name_map
 
 UI_TREE, BROKER_MAP = build_full_broker_db_structure(FINAL_RAW_DATA_CLEANED, HQ_DATA)
@@ -202,238 +197,612 @@ def calculate_macd(df, fast, slow, signal):
 
 @st.cache_data(ttl=3600)
 def get_stock_kline(stock_id):
-    ticker = f"{stock_id}.TW"
-    df = yf.download(ticker, start="2000-01-01", progress=False)
-    if df.empty:
-        df = yf.download(f"{stock_id}.TWO", start="2000-01-01", progress=False)
-    if not df.empty:
-        df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
-        df.reset_index(inplace=True)
-        df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
-    return df
+    end_date = datetime.date.today() + datetime.timedelta(days=1)
+    start_date = "2000-01-01" 
+    for suffix in ['.TW', '.TWO']:
+        ticker = f"{stock_id}{suffix}"
+        df = yf.download(ticker, start=start_date, end=end_date, progress=False)
+        if not df.empty:
+            df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
+            df.reset_index(inplace=True)
+            if 'Date' in df.columns:
+                df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
+            return df
+    return pd.DataFrame()
 
 @st.cache_data(ttl=1800)
 def get_fubon_history(sid, br_id):
     today_str = datetime.date.today().strftime('%Y-%m-%d')
-    url = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?A={sid}&BHID={br_id}&b={br_id}&C=3&D=1999-1-1&E={today_str}&ver=V3"
-    res = requests.get(url, headers=HEADERS, verify=False, timeout=20)
-    res.encoding = 'big5'
-    try:
-        df_broker = pd.read_html(StringIO(res.text))[2] 
-        if df_broker.shape[1] == 5:
+    url_history = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?A={sid}&BHID={br_id}&b={br_id}&C=3&D=1999-1-1&E={today_str}&ver=V3"
+    res_hist = requests.get(url_history, headers=HEADERS, verify=False, timeout=20)
+    res_hist.encoding = 'big5'
+    tables = pd.read_html(StringIO(res_hist.text))
+    for tb in tables:
+        if tb.shape[1] == 5 and '日期' in str(tb.iloc[0].values):
+            df_broker = tb.copy()
             df_broker.columns = ['Date', '買進', '賣出', '總額', '買賣超']
+            df_broker = df_broker.drop(0) 
             df_broker = df_broker[~df_broker['Date'].str.contains('日期|合計|說明', na=False)].copy()
             df_broker['Date'] = pd.to_datetime(df_broker['Date'].astype(str).str.replace(' ', ''))
             df_broker['買賣超'] = pd.to_numeric(df_broker['買賣超'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
             return df_broker
-    except: pass
     return pd.DataFrame(columns=['Date', '買賣超'])
 
+def safe_float(val):
+    if pd.isna(val): return None
+    return float(val)
+
 # ==========================================
-# 1. Tab 1~3 (保持完美功能)
+# 1. UI 介面設定
 # ==========================================
 tab1, tab2, tab3, tab4 = st.tabs(["🚀 特定分點", "📊 股票代號", "📍 地緣券商", "📊 主力 K 線圖"])
 
 # --- Tab 1 ---
 with tab1:
     c1, c2 = st.columns(2)
-    with c1: sel_hq = st.selectbox("選擇券商", sorted(UI_TREE.keys()), key="t1_hq")
-    with c2: sel_br_l = st.selectbox("選擇分點", sorted(UI_TREE[sel_hq]['branches'].keys()), key="t1_br")
-    sel_br_id = UI_TREE[sel_hq]['branches'][sel_br_l]
+    with c1: 
+        sorted_hq_keys = sorted(UI_TREE.keys())
+        sel_hq = st.selectbox("選擇券商", sorted_hq_keys, key="t1_b_sel")
+    with c2: 
+        b_opts = UI_TREE[sel_hq]['branches']
+        sel_br_l = st.selectbox("選擇分點", sorted(b_opts.keys()), key="t1_br_sel")
+        sel_br_id = b_opts[sel_br_l]
+
     c3, c4, c5 = st.columns(3)
     with c3: t1_sd = st.date_input("區間起點", datetime.date.today()-datetime.timedelta(days=7), key="t1_sd")
     with c4: t1_ed = st.date_input("區間終點", datetime.date.today(), key="t1_ed")
     with c5: t1_u = st.radio("統計單位", ["張數", "金額"], horizontal=True, key="t1_unit")
+
     c6, c7, c8 = st.columns([1.5, 1, 1])
     with c6: t1_mode = st.radio("篩選條件", ["嚴格模式", "濾網模式"], index=1, horizontal=True, key="t1_mode")
     with c7: t1_p = st.number_input("佔比 >= (%)", 0.0, 100.0, 95.0, step=1.0, key="t1_pct")
-    with c8: show_full = st.checkbox("顯示完整清單", value=False, key="t1_full")
+    with c8: st.write(""); show_full = st.checkbox("顯示完整清單", value=False, key="t1_full")
 
     if st.button("開始分點尋寶 🚀", key="t1_go"):
-        st.session_state.t1_searched = True
+        st.session_state.t1_searched = True 
         sd_s, ed_s = t1_sd.strftime('%Y-%m-%d'), t1_ed.strftime('%Y-%m-%d')
         bid_hq = UI_TREE[sel_hq]['bid'] 
         c_param = "B" if '金額' in t1_u else "E"
+        col_buy = '買進金額' if '金額' in t1_u else '買進張數'
+        col_sell = '賣出金額' if '金額' in t1_u else '賣出張數'
         url = f"https://fubon-ebrokerdj.fbs.com.tw/z/zg/zgb/zgb0.djhtm?a={bid_hq}&b={sel_br_id}&c={c_param}&e={sd_s}&f={ed_s}"
         try:
-            res = requests.get(url, headers=HEADERS, verify=False, timeout=15); res.encoding = 'big5'
-            def ext_nm(m):
-                s = re.search(r"GenLink2stk\s*\(\s*['\"](?:AS)?([^'\"]+)['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)", m.group(0), re.IGNORECASE)
-                return f"{s.group(1).strip()}{s.group(2).strip()}" if s else ""
-            processed = re.sub(r"<script[^>]*>(?:(?!</script>).)*GenLink2stk\s*\([^)]+\).*?</script>", ext_nm, res.text, flags=re.IGNORECASE | re.DOTALL)
+            res = requests.get(url, headers=HEADERS, verify=False, timeout=15)
+            res.encoding = 'big5'
+            def extract_stock_name_from_script(match):
+                m = re.search(r"GenLink2stk\s*\(\s*['\"](?:AS)?([^'\"]+)['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)", match.group(0), re.IGNORECASE)
+                if m: return f"{m.group(1).strip()}{m.group(2).strip()}"
+                return ""
+            processed_html_text = re.sub(r"<script[^>]*>(?:(?!</script>).)*GenLink2stk\s*\([^)]+\).*?</script>", extract_stock_name_from_script, res.text, flags=re.IGNORECASE | re.DOTALL)
+            tables = pd.read_html(StringIO(processed_html_text))
             df_all = pd.DataFrame()
-            for tb in pd.read_html(StringIO(processed)):
-                if tb.shape[1] >= 3 and any(word in str(tb) for word in ['買進','賣出','張數','金額','股票名稱']):
+            for tb in tables:
+                if tb.shape[1] < 3: continue
+                if any(word in str(tb) for word in ['買進','賣出','張數','金額','股票名稱']):
                     if tb.shape[1] >= 8:
-                        l = tb.iloc[:,[0,1,2]].copy(); l.columns=['股票名稱','買','賣']
-                        r = tb.iloc[:,[5,6,7]].copy(); r.columns=['股票名稱','買','賣']
+                        l = tb.iloc[:, [0, 1, 2]].copy(); l.columns=['股票名稱', col_buy, col_sell]
+                        r = tb.iloc[:, [5, 6, 7]].copy(); r.columns=['股票名稱', col_buy, col_sell]
                         df_all = pd.concat([df_all, l, r], ignore_index=True)
                     else:
-                        temp = tb.iloc[:,[0,1,2]].copy(); temp.columns=['股票名稱','買','賣']
+                        temp = tb.iloc[:, [0, 1, 2]].copy(); temp.columns=['股票名稱', col_buy, col_sell]
                         df_all = pd.concat([df_all, temp], ignore_index=True)
+
             if not df_all.empty:
                 df_all['股票名稱'] = df_all['股票名稱'].astype(str).str.strip()
+                df_all = df_all[~df_all['股票名稱'].str.contains('名稱|買進|賣出|合計|說明|註|差額|請選擇|nan|NaN|None|^\s*$', na=False)]
                 df_all = df_all[df_all['股票名稱'].apply(lambda x: bool(get_stock_id(x)))].copy()
-                for c in ['買','賣']: df_all[c] = pd.to_numeric(df_all[c].astype(str).str.replace(',',''), errors='coerce').fillna(0)
-                df_all['總額'] = df_all['買'] + df_all['賣']
+                for c in [col_buy, col_sell]: df_all[c] = pd.to_numeric(df_all[c].astype(str).str.replace(',',''), errors='coerce').fillna(0)
+                df_all['總額'] = df_all[col_buy] + df_all[col_sell]
                 df_all = df_all[df_all['總額'] > 0].copy()
-                df_all['買%'] = (df_all['買']/df_all['總額']*100).round(1)
-                df_all['賣%'] = (df_all['賣']/df_all['總額']*100).round(1)
+                df_all['買%'] = (df_all[col_buy] / df_all['總額'] * 100).round(1)
+                df_all['賣%'] = (df_all[col_sell] / df_all['總額'] * 100).round(1)
+
                 if '嚴格' in t1_mode:
-                    st.session_state.t1_buy_df = df_all[(df_all['買'] > 0) & (df_all['賣'] == 0)].copy()
-                    st.session_state.t1_sell_df = df_all[(df_all['賣'] > 0) & (df_all['買'] == 0)].copy()
+                    st.session_state.t1_buy_df = df_all[(df_all[col_buy] > 0) & (df_all[col_sell] == 0)].copy()
+                    st.session_state.t1_sell_df = df_all[(df_all[col_sell] > 0) & (df_all[col_buy] == 0)].copy()
                 else:
                     st.session_state.t1_buy_df = df_all[df_all['買%'] >= t1_p].copy()
                     st.session_state.t1_sell_df = df_all[df_all['賣%'] >= t1_p].copy()
-        except: st.error("抓取失敗")
+            else: st.warning("無資料。")
+        except Exception as e: st.error(f"發生錯誤: {e}")
 
+    # 顯示區塊 (不受按鈕重整影響)
     if st.session_state.t1_searched:
-        def disp_t1(df, key):
-            if not df.empty:
-                df_s = df.copy(); df_s['extracted_stock_id'] = df_s['股票名稱'].apply(get_stock_id)
-                df_s['畫圖'] = False; df_s = df_s[['畫圖','股票名稱','買','賣','總額','買%','賣%','extracted_stock_id']]
-                conf = {"畫圖": st.column_config.CheckboxColumn("送至Tab4"), "extracted_stock_id": None}
-                edited = st.data_editor(df_s, hide_index=True, column_config=conf, use_container_width=True, key=f"ed_{key}")
-                clicked = edited[edited['畫圖'] == True]
-                if not clicked.empty:
-                    send_to_tab4(clicked.iloc[0]['extracted_stock_id'], sel_br_l)
-                    st.success("✅ 設定成功，請切換至「📊 主力 K 線圖」")
-        st.markdown("### 🔴 大戶吃貨中")
-        disp_t1(st.session_state.t1_buy_df.sort_values('買', ascending=False).head(999 if show_full else 10), "t1b")
-        st.markdown("### 🟢 大戶倒貨中")
-        disp_t1(st.session_state.t1_sell_df.sort_values('賣', ascending=False).head(999 if show_full else 10), "t1s")
+        def display_table_with_button(df_to_show, key_prefix):
+            if not df_to_show.empty:
+                df_show = df_to_show.copy()
+                df_show['extracted_stock_id'] = df_show['股票名稱'].apply(get_stock_id)
+                df_show['K線圖'] = df_show['extracted_stock_id'].apply(lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zcw/zcw1_{sid}.djhtm" if sid else "")
+                df_show['分點明細'] = df_show['extracted_stock_id'].apply(lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={sid}&BHID={sel_br_id}&b={sel_br_id}&C=3" if sid else "")
+                df_show['畫圖'] = False 
+                
+                col_buy_name = '買進金額' if '金額' in t1_u else '買進張數'
+                col_sell_name = '賣出金額' if '金額' in t1_u else '賣出張數'
 
-# --- Tab 2 & 3 邏輯相同 (簡化結構防止報錯) ---
+                df_show = df_show[['畫圖', '股票名稱', 'K線圖', col_buy_name, col_sell_name, '總額', '買%', '賣%', '分點明細', 'extracted_stock_id']]
+                col_config = {
+                    "K線圖": st.column_config.LinkColumn("網頁K線", display_text="📈"),
+                    "分點明細": st.column_config.LinkColumn("網頁明細", display_text="🏦"),
+                    "畫圖": st.column_config.CheckboxColumn("送至Tab4"),
+                    "extracted_stock_id": None 
+                }
+                edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=f"editor_{key_prefix}")
+                clicked_rows = edited_df[edited_df['畫圖'] == True]
+                if not clicked_rows.empty:
+                    sid_clicked = clicked_rows.iloc[0]['extracted_stock_id']
+                    send_to_tab4(sid_clicked, sel_br_l)
+                    st.success(f"✅ 已設定！請點擊上方「📊 主力 K 線圖」。")
+
+        col_b = '買進金額' if '金額' in t1_u else '買進張數'
+        col_s = '賣出金額' if '金額' in t1_u else '賣出張數'
+        st.markdown(f"### 🔴 大戶吃貨中 - 共 {len(st.session_state.t1_buy_df)} 檔")
+        display_table_with_button(st.session_state.t1_buy_df.sort_values(by=col_b, ascending=False).head(999 if show_full else 10), "t1_buy")
+        st.markdown(f"### 🟢 大戶倒貨中 - 共 {len(st.session_state.t1_sell_df)} 檔")
+        display_table_with_button(st.session_state.t1_sell_df.sort_values(by=col_s, ascending=False).head(999 if show_full else 10), "t1_sell")
+
+# --- Tab 2 ---
 with tab2:
-    st.markdown("### 📈 誰在買賣這檔股票？")
-    t2_sid = st.text_input("股票代號", "2408", key="t2_input_s")
-    if st.button("開始追蹤 🚀", key="t2_go_btn"):
-        st.session_state.t2_searched = True
-        # ... (此處保留原 Tab2 邏輯)
-    if st.session_state.t2_searched:
-        pass
-
-with tab3:
-    st.markdown("### 📍 地緣券商尋寶")
-    sel_loc = st.selectbox("選擇地區", sorted(GEO_MAP.keys()), key="t3_loc_box")
-    sel_t3_br_l = st.selectbox("選擇分點", sorted(GEO_MAP[sel_loc].keys()), key="t3_br_box")
-    if st.button("啟動雷達 📡", key="t3_go_radar"):
-        st.session_state.t3_searched = True
-    if st.session_state.t3_searched:
-        pass
-
-# ==========================================
-# 📊 Tab 4 (完美重構的 TradingView 繪圖)
-# ==========================================
-with tab4:
-    c1, c2, c3, c4, c5 = st.columns([1, 1.5, 1, 1, 1])
-    with c1: t4_sid = st.text_input("股票代號", st.session_state.t4_sid_ui, key="t4_sid_input")
-    with c2:
-        all_br = sorted(list(BROKER_MAP.keys()))
-        t4_br_name = st.selectbox("搜尋分點", all_br, index=all_br.index(st.session_state.t4_br_ui) if st.session_state.t4_br_ui in all_br else 0, key="t4_br_input")
-    with c3: t4_period = st.radio("週期", ["日", "週", "月"], horizontal=True)
-    with c4: t4_days = st.number_input("K棒數", value=200, min_value=10)
-    with c5: st.write(""); draw_btn = st.button("🎨 繪製圖表", use_container_width=True)
+    c1, c2, c3 = st.columns(3)
+    with c1: t2_sid = st.text_input("股票代號", "2408", key="t2_s")
+    with c2: t2_sd = st.date_input("開始", datetime.date.today()-datetime.timedelta(days=7), key="t2_sd_in")
+    with c3: t2_ed = st.date_input("結束", datetime.date.today(), key="t2_ed_in")
     
+    c4, c5, c6, c7 = st.columns([2, 1, 1, 1.2])
+    with c4: t2_m = st.radio("模式", ["嚴格模式", "濾網模式"], index=1, horizontal=True, key="t2_mode")
+    with c5: t2_p = st.number_input("門檻佔比%", 0, 100, 95, step=1, key="t2_p_in")
+    with c6: t2_v = st.number_input("最低張數", 0, 1000000, 10, step=1, key="t2_v_in")
+    with c7: st.write(""); show_full_t2 = st.checkbox("顯示完整清單", value=False, key="t2_full")
+
+    t2_sid_clean = t2_sid.strip().replace(" ", "").upper()
+
+    if st.button("開始籌碼追蹤 🚀", key="t2_btn"):
+        st.session_state.t2_searched = True
+        if not t2_sid_clean.isalnum(): st.error("代號錯誤。")
+        else:
+            url = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco.djhtm?a={t2_sid_clean}&e={t2_sd.strftime('%Y-%m-%d')}&f={t2_ed.strftime('%Y-%m-%d')}"
+            try:
+                res = requests.get(url, headers=HEADERS, verify=False, timeout=15)
+                res.encoding = 'big5'
+                tables = pd.read_html(StringIO(res.text))
+                df_all = pd.DataFrame()
+                for tb in tables:
+                    if tb.shape[1] == 10:
+                        l = tb.iloc[:,[0,1,2]].copy(); l.columns=['券商','買','賣']
+                        r = tb.iloc[:,[5,6,7]].copy(); r.columns=['券商','買','賣']
+                        df_all = pd.concat([l, r])
+                
+                if not df_all.empty:
+                    df_all = df_all.dropna()
+                    df_all = df_all[~df_all['券商'].str.contains('券商|合計|平均|說明|註', na=False)]
+                    for c in ['買','賣']: df_all[c] = pd.to_numeric(df_all[c].astype(str).str.replace(',',''), errors='coerce').fillna(0)
+                    df_all['合計'] = df_all['買'] + df_all['賣']
+                    df_all['買進%'] = (df_all['買']/df_all['合計']*100).round(1)
+                    df_all['賣出%'] = (df_all['賣']/df_all['合計']*100).round(1)
+
+                    if t2_m == "嚴格模式":
+                        st.session_state.t2_buy_df = df_all[(df_all['買'] >= t2_v) & (df_all['賣'] == 0)].copy()
+                        st.session_state.t2_sell_df = df_all[(df_all['賣'] >= t2_v) & (df_all['買'] == 0)].copy()
+                    else:
+                        st.session_state.t2_buy_df = df_all[(df_all['買進%'] >= t2_p) & (df_all['買'] >= t2_v)].copy()
+                        st.session_state.t2_sell_df = df_all[(df_all['賣出%'] >= t2_p) & (df_all['賣'] >= t2_v)].copy()
+                else: st.warning("無資料。")
+            except Exception as e: st.error(f"發生錯誤: {e}")
+
+    if st.session_state.t2_searched:
+        def get_link_t2(broker_name):
+            name_cleaned = broker_name.replace("亞","亞").strip()
+            info = BROKER_MAP.get(name_cleaned)
+            if info: return f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={t2_sid_clean}&BHID={info['br_id']}&b={info['br_id']}&C=3"
+            for k, v in BROKER_MAP.items():
+                if name_cleaned in k or k in name_cleaned:
+                    return f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={t2_sid_clean}&BHID={v['br_id']}&b={v['br_id']}&C=3"
+            return ""
+
+        def display_table_with_button_t2(df_to_show, key_prefix):
+            if not df_to_show.empty:
+                df_show = df_to_show.copy()
+                df_show['網頁明細'] = df_show['券商'].apply(get_link_t2)
+                df_show['畫圖'] = False 
+                df_show = df_show[['畫圖', '券商', '買', '賣', '合計', '買進%', '賣出%', '網頁明細']]
+                col_config = {
+                    "網頁明細": st.column_config.LinkColumn("網頁明細", display_text="🏦"),
+                    "畫圖": st.column_config.CheckboxColumn("送至Tab4")
+                }
+                edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=f"editor_{key_prefix}")
+                clicked_rows = edited_df[edited_df['畫圖'] == True]
+                if not clicked_rows.empty:
+                    br_clicked = clicked_rows.iloc[0]['券商']
+                    send_to_tab4(t2_sid_clean, br_clicked)
+                    st.success(f"✅ 參數已設定！請點擊上方「📊 主力 K 線圖」。")
+
+        st.subheader("🔴 吃貨主力分點")
+        display_table_with_button_t2(st.session_state.t2_buy_df.sort_values('買', ascending=False).head(999 if show_full_t2 else 10), "t2_buy")
+        st.subheader("🟢 倒貨主力分點")
+        display_table_with_button_t2(st.session_state.t2_sell_df.sort_values('賣', ascending=False).head(999 if show_full_t2 else 10), "t2_sell")
+
+# --- Tab 3 ---
+with tab3:
+    c1, c2 = st.columns(2)
+    with c1:
+        sorted_loc_keys = sorted(GEO_MAP.keys())
+        sel_loc = st.selectbox("選擇地緣關鍵字", sorted_loc_keys, key="t3_loc_sel")
+    with c2:
+        loc_branches = GEO_MAP[sel_loc]
+        sel_t3_br_l = st.selectbox("選擇特定分點", sorted(loc_branches.keys()), key="t3_br_sel")
+        sel_t3_br_id = loc_branches[sel_t3_br_l]['br_id']
+        sel_t3_hq_id = loc_branches[sel_t3_br_l]['hq_id']
+
+    c3, c4, c5 = st.columns(3)
+    with c3: t3_sd = st.date_input("區間起點", datetime.date.today()-datetime.timedelta(days=7), key="t3_sd")
+    with c4: t3_ed = st.date_input("區間終點", datetime.date.today(), key="t3_ed")
+    with c5: t3_u = st.radio("單位", ["張數", "金額"], horizontal=True, key="t3_unit")
+
+    c6, c7, c8 = st.columns([1.5, 1, 1])
+    with c6: t3_mode = st.radio("篩選", ["嚴格", "濾網"], index=1, horizontal=True, key="t3_mode")
+    with c7: t3_p = st.number_input("佔比 >= (%)", 0.0, 100.0, 95.0, key="t3_pct")
+    with c8: st.write(""); show_full_t3 = st.checkbox("完整清單", value=False, key="t3_full")
+
+    if st.button("啟動地緣雷達 📡", key="t3_go"):
+        st.session_state.t3_searched = True
+        sd_s, ed_s = t3_sd.strftime('%Y-%m-%d'), t3_ed.strftime('%Y-%m-%d')
+        c_param = "B" if '金額' in t3_u else "E"
+        col_buy = '買進金額' if '金額' in t3_u else '買進張數'
+        col_sell = '賣出金額' if '金額' in t3_u else '賣出張數'
+        url = f"https://fubon-ebrokerdj.fbs.com.tw/z/zg/zgb/zgb0.djhtm?a={sel_t3_hq_id}&b={sel_t3_br_id}&c={c_param}&e={sd_s}&f={ed_s}"
+        try:
+            res = requests.get(url, headers=HEADERS, verify=False, timeout=15)
+            res.encoding = 'big5'
+            def extract_stock_name_from_script(match):
+                m = re.search(r"GenLink2stk\s*\(\s*['\"](?:AS)?([^'\"]+)['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)", match.group(0), re.IGNORECASE)
+                if m: return f"{m.group(1).strip()}{m.group(2).strip()}"
+                return ""
+            processed_html_text = re.sub(r"<script[^>]*>(?:(?!</script>).)*GenLink2stk\s*\([^)]+\).*?</script>", extract_stock_name_from_script, res.text, flags=re.IGNORECASE | re.DOTALL)
+            tables = pd.read_html(StringIO(processed_html_text))
+            df_all = pd.DataFrame()
+            for tb in tables:
+                if tb.shape[1] < 3: continue
+                if any(word in str(tb) for word in ['買進','賣出','張數','金額','股票名稱']):
+                    if tb.shape[1] >= 8:
+                        l = tb.iloc[:, [0, 1, 2]].copy(); l.columns=['股票名稱', col_buy, col_sell]
+                        r = tb.iloc[:, [5, 6, 7]].copy(); r.columns=['股票名稱', col_buy, col_sell]
+                        df_all = pd.concat([df_all, l, r], ignore_index=True)
+                    else:
+                        temp = tb.iloc[:, [0, 1, 2]].copy(); temp.columns=['股票名稱', col_buy, col_sell]
+                        df_all = pd.concat([df_all, temp], ignore_index=True)
+
+            if not df_all.empty:
+                df_all['股票名稱'] = df_all['股票名稱'].astype(str).str.strip()
+                df_all = df_all[~df_all['股票名稱'].str.contains('名稱|買進|賣出|合計|說明|註|差額|請選擇|nan|NaN|None|^\s*$', na=False)]
+                df_all = df_all[df_all['股票名稱'].apply(lambda x: bool(get_stock_id(x)))].copy()
+                for c in [col_buy, col_sell]: df_all[c] = pd.to_numeric(df_all[c].astype(str).str.replace(',',''), errors='coerce').fillna(0)
+                df_all['總額'] = df_all[col_buy] + df_all[col_sell]
+                df_all = df_all[df_all['總額'] > 0].copy()
+                df_all['買%'] = (df_all[col_buy] / df_all['總額'] * 100).round(1)
+                df_all['賣%'] = (df_all[col_sell] / df_all['總額'] * 100).round(1)
+                
+                if '嚴格' in t3_mode:
+                    st.session_state.t3_buy_df = df_all[(df_all[col_buy] > 0) & (df_all[col_sell] == 0)].copy()
+                    st.session_state.t3_sell_df = df_all[(df_all[col_sell] > 0) & (df_all[col_buy] == 0)].copy()
+                else:
+                    st.session_state.t3_buy_df = df_all[df_all['買%'] >= t3_p].copy()
+                    st.session_state.t3_sell_df = df_all[df_all['賣%'] >= t3_p].copy()
+            else: st.warning("無資料。")
+        except Exception as e: st.error(f"發生錯誤: {e}")
+
+    if st.session_state.t3_searched:
+        def display_table_with_button_t3(df_to_show, key_prefix):
+            if not df_to_show.empty:
+                df_show = df_to_show.copy()
+                df_show['extracted_stock_id'] = df_show['股票名稱'].apply(get_stock_id)
+                df_show['K線圖'] = df_show['extracted_stock_id'].apply(lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zcw/zcw1_{sid}.djhtm" if sid else "")
+                df_show['分點明細'] = df_show['extracted_stock_id'].apply(lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={sid}&BHID={sel_t3_br_id}&b={sel_t3_br_id}&C=3" if sid else "")
+                df_show['畫圖'] = False 
+                col_b = '買進金額' if '金額' in t3_u else '買進張數'
+                col_s = '賣出金額' if '金額' in t3_u else '賣出張數'
+                df_show = df_show[['畫圖', '股票名稱', 'K線圖', col_b, col_s, '總額', '買%', '賣%', '分點明細', 'extracted_stock_id']]
+                col_config = {
+                    "K線圖": st.column_config.LinkColumn("網頁K線", display_text="📈"),
+                    "分點明細": st.column_config.LinkColumn("網頁明細", display_text="🏦"),
+                    "畫圖": st.column_config.CheckboxColumn("送至Tab4"),
+                    "extracted_stock_id": None 
+                }
+                edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=f"editor_{key_prefix}")
+                clicked_rows = edited_df[edited_df['畫圖'] == True]
+                if not clicked_rows.empty:
+                    sid_clicked = clicked_rows.iloc[0]['extracted_stock_id']
+                    send_to_tab4(sid_clicked, sel_t3_br_l)
+                    st.success(f"✅ 參數已設定！請點擊上方「📊 主力 K 線圖」。")
+
+        col_b = '買進金額' if '金額' in t3_u else '買進張數'
+        col_s = '賣出金額' if '金額' in t3_u else '賣出張數'
+        st.markdown(f"### 🔴 該分點吃貨中 - 共 {len(st.session_state.t3_buy_df)} 檔")
+        display_table_with_button_t3(st.session_state.t3_buy_df.sort_values(by=col_b, ascending=False).head(999 if show_full_t3 else 10), "t3_buy")
+        st.markdown(f"### 🟢 該分點倒貨中 - 共 {len(st.session_state.t3_sell_df)} 檔")
+        display_table_with_button_t3(st.session_state.t3_sell_df.sort_values(by=col_s, ascending=False).head(999 if show_full_t3 else 10), "t3_sell")
+
+# --- Tab 4 (TradingView 輕量版 保底防崩潰版) ---
+with tab4:
+    col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns([1, 1.5, 1, 1, 1])
+    with col_t1:
+        t4_sid = st.text_input("股票代號", st.session_state.t4_sid_ui, key="t4_sid_input")
+    with col_t2:
+        all_br_names = sorted(list(BROKER_MAP.keys()))
+        passed_br = st.session_state.t4_br_ui
+        default_br_idx = all_br_names.index(passed_br) if passed_br in all_br_names else 0
+        t4_br_name = st.selectbox("搜尋分點", all_br_names, index=default_br_idx, key="t4_br_input")
+    with col_t3: 
+        t4_period = st.radio("週期", ["日", "週", "月"], horizontal=True)
+    with col_t4: 
+        t4_days = st.number_input("K棒數", value=200, min_value=10, max_value=1000)
+    with col_t5:
+        st.write("") 
+        draw_btn = st.button("🎨 繪圖", use_container_width=True)
+        
     col_x1, col_x2, col_x3 = st.columns([1, 2, 1])
     with col_x1:
-        if st.button("❤️ 存入清單"):
-            st.session_state.watchlist.append({"股票": t4_sid, "分點": t4_br_name})
+        fav_btn = st.button("❤️ 存入清單", use_container_width=True)
     with col_x2:
-        hl_val = st.number_input("📏 新增水平線 (Enter 畫線)", value=0.0)
-        if hl_val > 0 and hl_val not in st.session_state.custom_hlines:
-            st.session_state.custom_hlines.append(hl_val); st.session_state.auto_draw = True
+        hline_val = st.number_input("📏 新增水平線 (輸入價格後按 Enter 即畫線)", value=0.0, step=1.0)
+        if hline_val > 0 and hline_val not in st.session_state.custom_hlines:
+            st.session_state.custom_hlines.append(hline_val)
+            st.session_state.auto_draw = True 
     with col_x3:
-        if st.button("🗑️ 清除畫線"): st.session_state.custom_hlines = []; st.session_state.auto_draw = True
+        st.write("")
+        clear_btn = st.button("🗑️ 清除所有畫線", use_container_width=True)
+        if clear_btn:
+            st.session_state.custom_hlines = []
+            st.session_state.auto_draw = True
 
     t4_sid_clean = t4_sid.strip().upper()
+    
+    if fav_btn:
+        entry = {"股票代號": t4_sid_clean, "追蹤分點": t4_br_name}
+        if entry not in st.session_state.watchlist:
+            st.session_state.watchlist.append(entry)
+            st.success(f"✅ 已加入暫存清單！")
+        else:
+            st.warning("⚠️ 已在清單中。")
 
+    with st.expander("⚙️ 進階指標參數設定", expanded=False):
+        sc1, sc2, sc3 = st.columns(3)
+        with sc1: 
+            st.markdown("**布林通道**")
+            c_bb1, c_bb2 = st.columns(2)
+            with c_bb1: bb_w = st.number_input("週期", value=52)
+            with c_bb2: bb_std = st.number_input("標準差", value=2.0, step=0.1)
+        with sc2: 
+            st.markdown("**短線 MACD**")
+            c_m11, c_m12, c_m13 = st.columns(3)
+            with c_m11: macd1_f = st.number_input("快", value=12, key="m1f")
+            with c_m12: macd1_s = st.number_input("慢", value=26, key="m1s")
+            with c_m13: macd1_sig = st.number_input("訊號", value=9, key="m1sig")
+        with sc3: 
+            st.markdown("**長線 MACD**")
+            c_m21, c_m22, c_m23 = st.columns(3)
+            with c_m21: macd2_f = st.number_input("快", value=26, key="m2f")
+            with c_m22: macd2_s = st.number_input("慢", value=52, key="m2s")
+            with c_m23: macd2_sig = st.number_input("訊號", value=18, key="m2sig")
+
+    if st.session_state.watchlist:
+        with st.expander("⭐ 暫存主力清單", expanded=True):
+            wl_df = pd.DataFrame(st.session_state.watchlist)
+            wl_df.insert(0, '載入', False)
+            wl_df['刪除'] = False
+            wl_config = {"載入": st.column_config.CheckboxColumn("載入繪圖"), "刪除": st.column_config.CheckboxColumn("刪除")}
+            edited_wl = st.data_editor(wl_df, hide_index=True, column_config=wl_config, use_container_width=True, key="wl_editor")
+            
+            if not edited_wl[edited_wl['載入'] == True].empty:
+                send_to_tab4(edited_wl[edited_wl['載入'] == True].iloc[0]['股票代號'], edited_wl[edited_wl['載入'] == True].iloc[0]['追蹤分點'])
+                st.rerun() 
+            if not edited_wl[edited_wl['刪除'] == True].empty:
+                del_sid = edited_wl[edited_wl['刪除'] == True].iloc[0]['股票代號']
+                del_br = edited_wl[edited_wl['刪除'] == True].iloc[0]['追蹤分點']
+                st.session_state.watchlist = [item for item in st.session_state.watchlist if not (item['股票代號'] == del_sid and item['追蹤分點'] == del_br)]
+                st.rerun()
+
+    # 執行繪圖
     if draw_btn or st.session_state.auto_draw:
-        st.session_state.auto_draw = False
+        st.session_state.auto_draw = False 
         t4_br_id = BROKER_MAP[t4_br_name]['br_id']
-        with st.spinner(f"正在分析 {t4_sid_clean}..."):
+        
+        with st.spinner(f"為您繪製 {t4_sid_clean} 中..."):
             try:
                 df_k = get_stock_kline(t4_sid_clean)
-                if df_k.empty: st.error("找不到 K 線")
+                if df_k.empty: st.error("找不到 K 線資料。")
                 else:
-                    # 抓取名稱
                     stock_name = ""
-                    url_h = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?A={t4_sid_clean}&BHID={t4_br_id}&b={t4_br_id}&C=3&D=1999-1-1&E={datetime.date.today().strftime('%Y-%m-%d')}&ver=V3"
-                    res_h = requests.get(url_h, headers=HEADERS, verify=False, timeout=20); res_h.encoding = 'big5'
-                    m_nm = re.search(r"對\s+([^\(]+)\(\s*" + re.escape(t4_sid_clean) + r"\s*\)個股", res_h.text)
-                    if m_nm: stock_name = m_nm.group(1).strip()
+                    url_history = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?A={t4_sid_clean}&BHID={t4_br_id}&b={t4_br_id}&C=3&D=1999-1-1&E={datetime.date.today().strftime('%Y-%m-%d')}&ver=V3"
+                    res_hist = requests.get(url_history, headers=HEADERS, verify=False, timeout=20)
+                    res_hist.encoding = 'big5'
+                    m_name = re.search(r"對\s+([^\(]+)\(\s*" + re.escape(t4_sid_clean) + r"\s*\)個股", res_hist.text)
+                    if m_name: stock_name = m_name.group(1).strip()
+
+                    df_broker = pd.DataFrame()
+                    tables = pd.read_html(StringIO(res_hist.text))
+                    for tb in tables:
+                        if tb.shape[1] == 5 and '日期' in str(tb.iloc[0].values):
+                            df_broker = tb.copy()
+                            df_broker.columns = ['Date', '買進', '賣出', '總額', '買賣超']
+                            df_broker = df_broker.drop(0) 
+                            break
                     
-                    df_broker = get_fubon_history(t4_sid_clean, t4_br_id)
-                    df_merged = pd.merge(df_k, df_broker, on='Date', how='left').fillna(0)
+                    if df_broker.empty: st.info("近期無交易紀錄。")
+                    else:
+                        df_broker = df_broker[~df_broker['Date'].str.contains('日期|合計|說明', na=False)].copy()
+                        df_broker['Date'] = pd.to_datetime(df_broker['Date'].astype(str).str.replace(' ', ''))
+                        df_broker['買賣超'] = pd.to_numeric(df_broker['買賣超'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+
+                    df_merged = pd.merge(df_k, df_broker[['Date', '買賣超']], on='Date', how='left')
+                    df_merged['買賣超'] = df_merged['買賣超'].fillna(0) 
+                    
                     df_merged.set_index('Date', inplace=True)
+                    if t4_period == "週": df_resampled = df_merged.resample('W-FRI').agg({'Open':'first', 'High':'max', 'Low':'min', 'Close':'last', '買賣超':'sum'})
+                    elif t4_period == "月": df_resampled = df_merged.resample('M').agg({'Open':'first', 'High':'max', 'Low':'min', 'Close':'last', '買賣超':'sum'})
+                    else: df_resampled = df_merged.copy()
                     
-                    if t4_period == "週": df_r = df_merged.resample('W-FRI').agg({'Open':'first','High':'max','Low':'min','Close':'last','買賣超':'sum'})
-                    elif t4_period == "月": df_r = df_merged.resample('M').agg({'Open':'first','High':'max','Low':'min','Close':'last','買賣超':'sum'})
-                    else: df_r = df_merged.copy()
-                    
-                    df_r = df_r.dropna().reset_index()
-                    df_r['Date_s'] = df_r['Date'].dt.strftime('%Y-%m-%d')
-                    df_r['bm'] = df_r['Close'].rolling(52).mean()
-                    df_r['bu'] = df_r['bm'] + 2.0 * df_r['Close'].rolling(52).std()
-                    df_r['bd'] = df_r['bm'] - 2.0 * df_r['Close'].rolling(52).std()
-                    m1, s1, h1 = calculate_macd(df_r, 12, 26, 9)
-                    m2, s2, h2 = calculate_macd(df_r, 26, 52, 18)
-                    
-                    # 💡 建立絕對安全的 JSON 資料包
-                    plot_data = []
-                    df_plot = df_r.tail(int(t4_days))
-                    for i, r in df_plot.iterrows():
-                        plot_data.append({
-                            "t": r['Date_s'], "o": r['Open'], "h": r['High'], "l": r['Low'], "c": r['Close'], "v": r['買賣超'],
-                            "bm": safe_float(r['bm']), "bu": safe_float(r['bu']), "bd": safe_float(r['bd']),
-                            "h1": safe_float(h1.iloc[i]), "m1": safe_float(m1.iloc[i]), "s1": safe_float(s1.iloc[i]),
-                            "h2": safe_float(h2.iloc[i]), "m2": safe_float(m2.iloc[i]), "s2": safe_float(s2.iloc[i])
-                        })
+                    df_resampled = df_resampled.dropna(subset=['Close']).reset_index()
+                    df_resampled['Date_str'] = df_resampled['Date'].dt.strftime('%Y-%m-%d') 
 
-                    hlines_json = json.dumps(st.session_state.custom_hlines)
+                    df_resampled['BB_mid'] = df_resampled['Close'].rolling(int(bb_w)).mean()
+                    df_resampled['BB_std'] = df_resampled['Close'].rolling(int(bb_w)).std()
+                    df_resampled['BB_up'] = df_resampled['BB_mid'] + float(bb_std) * df_resampled['BB_std']
+                    df_resampled['BB_dn'] = df_resampled['BB_mid'] - float(bb_std) * df_resampled['BB_std']
+                    
+                    macd1, sig1, hist1 = calculate_macd(df_resampled, int(macd1_f), int(macd1_s), int(macd1_sig))
+                    macd2, sig2, hist2 = calculate_macd(df_resampled, int(macd2_f), int(macd2_s), int(macd2_sig))
+                    
+                    # 💡 關鍵解法：將所有指標疊加到同一個 Dataframe 統一處理，丟棄全部副圖
+                    df_plot = df_resampled.tail(int(t4_days)).copy()
+                    
+                    df_plot['M1_hist'] = hist1.tail(int(t4_days))
+                    df_plot['M1_macd'] = macd1.tail(int(t4_days))
+                    df_plot['M1_sig'] = sig1.tail(int(t4_days))
+                    
+                    df_plot['M2_hist'] = hist2.tail(int(t4_days))
+                    df_plot['M2_macd'] = macd2.tail(int(t4_days))
+                    df_plot['M2_sig'] = sig2.tail(int(t4_days))
+
+                    # 轉化為 JS 陣列
+                    all_data = []
+                    for i, row in df_plot.iterrows():
+                        if pd.isna(row['Close']): continue
+                        
+                        item = {
+                            "time": row['Date_str'],
+                            "open": safe_float(row['Open']), "high": safe_float(row['High']),
+                            "low": safe_float(row['Low']), "close": safe_float(row['Close']),
+                            "vol": safe_float(row['買賣超'])
+                        }
+                        if not pd.isna(row['BB_mid']): item["bbm"] = safe_float(row['BB_mid'])
+                        if not pd.isna(row['BB_up']): item["bbu"] = safe_float(row['BB_up'])
+                        if not pd.isna(row['BB_dn']): item["bbd"] = safe_float(row['BB_dn'])
+                        
+                        if not pd.isna(row['M1_hist']): item["h1"] = safe_float(row['M1_hist'])
+                        if not pd.isna(row['M1_macd']): item["m1"] = safe_float(row['M1_macd'])
+                        if not pd.isna(row['M1_sig']): item["s1"] = safe_float(row['M1_sig'])
+
+                        if not pd.isna(row['M2_hist']): item["h2"] = safe_float(row['M2_hist'])
+                        if not pd.isna(row['M2_macd']): item["m2"] = safe_float(row['M2_macd'])
+                        if not pd.isna(row['M2_sig']): item["s2"] = safe_float(row['M2_sig'])
+
+                        all_data.append(item)
+
+                    hlines_js_array = json.dumps(st.session_state.custom_hlines)
+
                     html_code = f"""
-                    <!DOCTYPE html><html><head><script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script><style>
-                    body {{ margin:0; background:#131722; font-family:sans-serif; overflow:hidden; }}
-                    #chart {{ width:100vw; height:95vh; position:relative; }}
-                    .watermark {{ position:absolute; top:35%; left:50%; transform:translate(-50%,-50%); font-size:75px; font-weight:bold; color:rgba(255,255,255,0.06); z-index:1; pointer-events:none; white-space:nowrap; }}
-                    .legend {{ position:absolute; left:12px; top:12px; z-index:9999; font-size:13px; color:#d1d4dc; background:rgba(19,23,34,0.9); padding:10px; border-radius:6px; border:1px solid #2962FF; pointer-events:none; }}
-                    </style></head><body><div id="chart"><div class="watermark">{t4_sid_clean} {stock_name}</div><div id="legend" class="legend">將滑鼠移至 K 線上</div></div><script>
-                    const data = {json.dumps(plot_data)}; const hlines = {hlines_json};
-                    const chart = LightweightCharts.createChart(document.getElementById('chart'), {{ 
-                        layout:{{backgroundColor:'#131722',textColor:'#d1d4dc'}}, grid:{{vertLines:{{color:'#242733'}},horzLines:{{color:'#242733'}}}}, 
-                        crosshair:{{mode:LightweightCharts.CrosshairMode.Normal}} 
-                    }});
-                    const k = chart.addCandlestickSeries({{upColor:'#ef5350',downColor:'#26a69a',borderVisible:false,wickUpColor:'#ef5350',wickDownColor:'#26a69a'}});
-                    k.setData(data.map(d=>({{time:d.t,open:d.o,high:d.h,low:d.l,close:d.c}})));
-                    
-                    const mid = chart.addLineSeries({{color:'#FFD600',lineWidth:1,priceLineVisible:false,lastValueVisible:false}});
-                    mid.setData(data.filter(d=>d.bm!==null).map(d=>({{time:d.t,value:d.bm}})));
-                    const up = chart.addLineSeries({{color:'white',lineWidth:1,lineStyle:2,priceLineVisible:false,lastValueVisible:false}});
-                    up.setData(data.filter(d=>d.bu!==null).map(d=>({{time:d.t,value:d.bu}})));
-                    const dn = chart.addLineSeries({{color:'white',lineWidth:1,lineStyle:2,priceLineVisible:false,lastValueVisible:false}});
-                    dn.setData(data.filter(d=>d.bd!==null).map(d=>({{time:d.t,value:d.bd}})));
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+                        <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
+                        <style>
+                            body {{ margin: 0; padding: 0; background-color: #131722; overflow: hidden; font-family: "Microsoft JhengHei", sans-serif; }}
+                            #chart {{ width: 100vw; height: 95vh; position: relative; }}
+                            
+                            .tv-watermark {{
+                                position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%);
+                                font-size: 80px; font-weight: bold; color: rgba(255, 255, 255, 0.06);
+                                z-index: 1; pointer-events: none; white-space: nowrap; letter-spacing: 4px;
+                            }}
+                            
+                            .tv-legend {{
+                                position: absolute; left: 12px; top: 12px; z-index: 100; font-size: 13px; color: #d1d4dc; 
+                                pointer-events: none; background: rgba(19, 23, 34, 0.85); padding: 8px 12px; 
+                                border-radius: 6px; border: 1px solid #363c4e; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+                            }}
+                            .lg-title {{ color: #2962FF; font-weight: bold; font-size: 15px; margin-bottom: 6px; border-bottom: 1px solid #444; padding-bottom: 4px; }}
+                            .lg-row {{ display: flex; justify-content: space-between; margin-bottom: 2px; width: 160px; }}
+                            .lg-label {{ color: #a0a3ab; }}
+                            .lg-vol {{ margin-top: 6px; padding-top: 6px; border-top: 1px dashed #555; font-size: 15px; display: flex; justify-content: space-between; font-weight: bold; }}
+                            .lg-macd {{ margin-top: 6px; font-size: 12px; color: #8a8d9d; line-height: 1.4; }}
+                        </style>
+                    </head>
+                    <body>
+                        <div id="chart">
+                            <div class="tv-watermark">{t4_sid_clean} {stock_name}</div>
+                            <div id="legend" class="tv-legend">將滑鼠移至 K 線上查看數據</div>
+                        </div>
+                        <script>
+                            const rawData = {json.dumps(all_data)};
+                            const hlines = {hlines_js_array};
+                            
+                            const layoutOptions = {{ layout: {{ backgroundColor: '#131722', textColor: '#d1d4dc' }}, grid: {{ vertLines: {{ color: '#242733' }}, horzLines: {{ color: '#242733' }} }}, crosshair: {{ mode: LightweightCharts.CrosshairMode.Normal }} }};
+                            const chart = LightweightCharts.createChart(document.getElementById('chart'), layoutOptions);
+                            
+                            // K線
+                            const seriesK = chart.addCandlestickSeries({{ upColor: '#ef5350', downColor: '#26a69a', borderVisible: false, wickUpColor: '#ef5350', wickDownColor: '#26a69a' }});
+                            seriesK.setData(rawData.map(d => ({{time: d.time, open: d.open, high: d.high, low: d.low, close: d.close}})));
+                            
+                            // BB
+                            const bbMid = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
+                            bbMid.setData(rawData.filter(d => d.bbm !== undefined).map(d => ({{time: d.time, value: d.bbm}})));
+                            const bbUp = chart.addLineSeries({{ color: 'rgba(255, 255, 255, 0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
+                            bbUp.setData(rawData.filter(d => d.bbu !== undefined).map(d => ({{time: d.time, value: d.bbu}})));
+                            const bbDn = chart.addLineSeries({{ color: 'rgba(255, 255, 255, 0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
+                            bbDn.setData(rawData.filter(d => d.bbd !== undefined).map(d => ({{time: d.time, value: d.bbd}})));
+                            
+                            // 買賣超 (放在主圖下方 15%)
+                            const seriesVol = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: '', scaleMargins: {{ top: 0.85, bottom: 0 }}, lastValueVisible: false, priceLineVisible: false }});
+                            seriesVol.setData(rawData.map(d => ({{time: d.time, value: d.vol, color: d.vol >= 0 ? 'rgba(239, 83, 80, 0.8)' : 'rgba(38, 166, 154, 0.8)'}})));
+                            
+                            // MACD 短線 (放在主圖下方 15%~30%)
+                            const seriesH1 = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'm1', scaleMargins: {{ top: 0.7, bottom: 0.15 }}, lastValueVisible: false, priceLineVisible: false }});
+                            seriesH1.setData(rawData.filter(d => d.h1 !== undefined).map(d => ({{time: d.time, value: d.h1, color: d.h1 >= 0 ? 'rgba(239, 83, 80, 0.5)' : 'rgba(38, 166, 154, 0.5)'}})));
+                            const seriesM1 = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, priceScaleId: 'm1', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
+                            seriesM1.setData(rawData.filter(d => d.m1 !== undefined).map(d => ({{time: d.time, value: d.m1}})));
+                            const seriesS1 = chart.addLineSeries({{ color: '#00E676', lineWidth: 1, priceScaleId: 'm1', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
+                            seriesS1.setData(rawData.filter(d => d.s1 !== undefined).map(d => ({{time: d.time, value: d.s1}})));
 
-                    const vol = chart.addHistogramSeries({{priceScaleId:'',scaleMargins:{{top:0.85,bottom:0}},priceLineVisible:false,lastValueVisible:false}});
-                    vol.setData(data.map(d=>({{time:d.t,value:d.v,color:d.v>=0?'rgba(239,83,80,0.5)':'rgba(38,166,154,0.5)'}})));
-                    
-                    const h1 = chart.addHistogramSeries({{priceScaleId:'m1',scaleMargins:{{top:0.65,bottom:0.18}},priceLineVisible:false,lastValueVisible:false}});
-                    h1.setData(data.filter(d=>d.h1!==null).map(d=>({{time:d.t,value:d.h1,color:d.h1>=0?'#ef5350':'#26a69a'}})));
-                    const h2 = chart.addHistogramSeries({{priceScaleId:'m2',scaleMargins:{{top:0.5,bottom:0.35}},priceLineVisible:false,lastValueVisible:false}});
-                    h2.setData(data.filter(d=>d.h2!==null).map(d=>({{time:d.t,value:d.h2,color:d.h2>=0?'#ef5350':'#26a69a'}})));
-                    chart.priceScale('m1').applyOptions({{visible:false}}); chart.priceScale('m2').applyOptions({{visible:false}});
+                            // MACD 長線 (放在主圖下方 30%~45%)
+                            const seriesH2 = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'm2', scaleMargins: {{ top: 0.55, bottom: 0.3 }}, lastValueVisible: false, priceLineVisible: false }});
+                            seriesH2.setData(rawData.filter(d => d.h2 !== undefined).map(d => ({{time: d.time, value: d.h2, color: d.h2 >= 0 ? 'rgba(239, 83, 80, 0.5)' : 'rgba(38, 166, 154, 0.5)'}})));
+                            const seriesM2 = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, priceScaleId: 'm2', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
+                            seriesM2.setData(rawData.filter(d => d.m2 !== undefined).map(d => ({{time: d.time, value: d.m2}})));
+                            const seriesS2 = chart.addLineSeries({{ color: '#00E676', lineWidth: 1, priceScaleId: 'm2', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
+                            seriesS2.setData(rawData.filter(d => d.s2 !== undefined).map(d => ({{time: d.time, value: d.s2}})));
 
-                    hlines.forEach(v => {{ const l = chart.addLineSeries({{color:'#2962FF',lineWidth:1,lineStyle:2,lastValueVisible:false}}); l.setData(data.map(d=>({{time:d.t,value:v}}))); }});
+                            // 隱藏副圖的 Y 軸
+                            chart.priceScale('m1').applyOptions({{ visible: false }});
+                            chart.priceScale('m2').applyOptions({{ visible: false }});
 
-                    const leg = document.getElementById('legend');
-                    const dow = (t) => ['週日','週一','週二','週三','週四','週五','週六'][new Date(t).getDay()];
-                    chart.subscribeCrosshairMove(p => {{
-                        if(!p.time) return; const d = data.find(x=>x.t===p.time); if(!d) return;
-                        leg.innerHTML = `<div style="color:#2962FF;font-weight:bold;margin-bottom:6px;">{t4_sid_clean} {stock_name} | ${{p.time}} ${{dow(p.time)}}</div>
-                        開: ${{d.o.toFixed(2)}} | 高: <span style="color:#ef5350">${{d.h.toFixed(2)}}</span> | 低: <span style="color:#26a69a">${{d.l.toFixed(2)}}</span> | 收: <b>${{d.c.toFixed(2)}}</b><br>
-                        分點買賣: <span style="color:${{d.v>=0?'#ef5350':'#26a69a'}}"><b>${{d.v}} 張</b></span><hr style="border-color:#444;margin:6px 0;">
-                        短MACD柱: <span style="color:${{d.h1>=0?'#ef5350':'#26a69a'}}">${{d.h1.toFixed(2)}}</span><br>長MACD柱: <span style="color:${{d.h2>=0?'#ef5350':'#26a69a'}}">${{d.h2.toFixed(2)}}</span>`;
-                    }});
-                    chart.timeScale().fitContent();
-                    </script></body></html>"""
-                    components.html(html_code, height=900)
+                            // 水平線
+                            hlines.forEach(val => {{
+                                const hline = chart.addLineSeries({{ color: '#2962FF', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, priceLineVisible: true, lastValueVisible: false }});
+                                hline.setData(rawData.map(d => ({{time: d.time, value: val}})));
+                            }});
+
+                            // 超完美置頂資料窗
+                            const legend = document.getElementById('legend');
+                            const getDayOfWeek = (d) => ['週日', '週一', '週二', '週三', '週四', '週五', '週六'][new Date(d).getDay()];
+                            const dictByTime = {{}}; rawData.forEach(d => dictByTime[d.time] = d);
+
+                            chart.subscribeCrosshairMove(param => {{
+                                if(!param.time || !dictByTime[param.time] || param.point.x < 0 || param.point.y < 0) {{
+                                    legend.innerHTML = '將滑鼠移至 K 線上查看數據'; return;
+                                }}
+                                const d = dictByTime[param.time];
+                                const vColor = d.vol >= 0 ? '#ef5350' : '#26a69a';
+                                
+                                let html = `
+                                    <div class="lg-title">{t4_sid_clean} {stock_name} | ${{param.time}} ${{getDayOfWeek(param.time)}}</div>
+                                    <div class="lg-row"><span class="lg-label">開盤</span><span style="color:white;">${{d.open.toFixed(2)}}</span></div>
+                                    <div class="lg-row"><span class="lg-label">最高</span><span style="color:#ef5350;">${{d.high.toFixed(2)}}</span></div>
+                                    <div class="lg-row"><span class="lg-label">最低</span><span style="color:#26a69a;">${{d.low.toFixed(2)}}</span></div>
+                                    <div class="lg-row"><span class="lg-label">收盤</span><span style="color:white;font-weight:bold;">${{d.close.toFixed(2)}}</span></div>
+                                    <div class="lg-vol"><span class="lg-label">買賣超 ({t4_br_name})</span> <span style="color:${{vColor}};">${{d.vol}} 張</span></div>
+                                `;
+
+                                if(d.h1 !== undefined) html += `<div class="lg-macd"><b>短 MACD:</b> 柱 <span style="color:${{d.h1>=0?'#ef5350':'#26a69a'}}">${{d.h1.toFixed(2)}}</span> | 快 <span style="color:#FFD600">${{d.m1.toFixed(2)}}</span> | 慢 <span style="color:#00E676">${{d.s1.toFixed(2)}}</span></div>`;
+                                if(d.h2 !== undefined) html += `<div class="lg-macd"><b>長 MACD:</b> 柱 <span style="color:${{d.h2>=0?'#ef5350':'#26a69a'}}">${{d.h2.toFixed(2)}}</span> | 快 <span style="color:#FFD600">${{d.m2.toFixed(2)}}</span> | 慢 <span style="color:#00E676">${{d.s2.toFixed(2)}}</span></div>`;
+                                
+                                legend.innerHTML = html;
+                            }});
+
+                            chart.timeScale().fitContent();
+                            window.addEventListener('resize', () => {{ chart.applyOptions({{width: document.getElementById('chart').clientWidth, height: document.getElementById('chart').clientHeight}}); }});
+                        </script>
+                    </body>
+                    </html>
+                    """
+                    components.html(html_code, height=800)
             except Exception as e: st.error(f"發生錯誤: {e}")
