@@ -311,7 +311,8 @@ def get_stock_kline(stock_id):
     start_date = "2000-01-01" 
     for suffix in ['.TW', '.TWO']:
         ticker = f"{stock_id}{suffix}"
-        df = yf.download(ticker, start=start_date, end=end_date, progress=False)
+        # 🌟 加入 auto_adjust=False，強制取得未除權息的「真實原價」
+        df = yf.download(ticker, start=start_date, end=end_date, progress=False, auto_adjust=False)
         if not df.empty:
             df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
             df.reset_index(inplace=True)
