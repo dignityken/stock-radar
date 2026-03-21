@@ -6,3 +6,5 @@ beautifulsoup4
 html5lib
 plotly
 yfinance
+gspread
+google-auth
