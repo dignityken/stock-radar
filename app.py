@@ -197,6 +197,13 @@ if 'auto_draw' not in st.session_state: st.session_state.auto_draw = False
 if 'custom_hlines' not in st.session_state: st.session_state.custom_hlines = []
 if 'table_refresh_key' not in st.session_state: st.session_state.table_refresh_key = 0
 
+if 'chart_render_key' not in st.session_state: st.session_state.chart_render_key = 0
+if 'show_chart' not in st.session_state: st.session_state.show_chart = False
+if 'drawn_sid' not in st.session_state: st.session_state.drawn_sid = "6488"
+if 'drawn_br_name' not in st.session_state: st.session_state.drawn_br_name = "兆豐-忠孝"
+if 'drawn_period' not in st.session_state: st.session_state.drawn_period = "日"
+if 'drawn_days' not in st.session_state: st.session_state.drawn_days = 200
+
 if 'watchlist_loaded' not in st.session_state:
     st.session_state.watchlist = load_gsheet_watchlist(current_user)
     st.session_state.watchlist_loaded = True
@@ -694,13 +701,11 @@ with tab4:
     col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns([1, 1.5, 1, 1, 1])
     
     with col_t1:
-        # 🌟 移除 key 綁定，改用 value 餵入，徹底解決 StreamlitAPIException
         t4_sid = st.text_input("股票代號", value=st.session_state.get('t4_target_sid', '6488'))
     with col_t2:
         all_br_names = sorted(list(BROKER_MAP.keys()))
         t4_br_val = st.session_state.get('t4_target_br', '兆豐-忠孝')
         idx = all_br_names.index(t4_br_val) if t4_br_val in all_br_names else 0
-        # 🌟 移除 key 綁定，改用 index 餵入，徹底解決 StreamlitAPIException
         t4_br_name = st.selectbox("搜尋分點", all_br_names, index=idx)
     with col_t3: 
         t4_period = st.radio("週期", ["日", "週", "月"], horizontal=True)
@@ -723,6 +728,7 @@ with tab4:
             st.session_state.t4_target_sid = t4_sid
             st.session_state.t4_target_br = t4_br_name
             st.session_state.auto_draw = True
+            st.session_state.chart_render_key += 1
             st.rerun()
     with col_x3:
         st.write("")
@@ -731,6 +737,7 @@ with tab4:
             st.session_state.t4_target_sid = t4_sid
             st.session_state.t4_target_br = t4_br_name
             st.session_state.auto_draw = True
+            st.session_state.chart_render_key += 1
             st.rerun()
     
     t4_sid_clean = t4_sid.strip().upper()
@@ -773,7 +780,6 @@ with tab4:
     if st.session_state.watchlist:
         with st.expander(f"⭐ 【{current_user}】的專屬主力清單", expanded=True):
             
-            # 1. 建立清單專屬的動態 Key (用來強制清空打勾狀態)
             if 'wl_refresh_key' not in st.session_state:
                 st.session_state.wl_refresh_key = 0
                 
@@ -782,11 +788,9 @@ with tab4:
             wl_df['刪除'] = False
             wl_config = {"載入": st.column_config.CheckboxColumn("載入繪圖"), "刪除": st.column_config.CheckboxColumn("刪除")}
             
-            # 2. 將動態 key 綁定給 data_editor
             editor_key = f"wl_editor_{st.session_state.wl_refresh_key}"
             st.data_editor(wl_df, hide_index=True, column_config=wl_config, width="stretch", key=editor_key)
             
-            # 3. 監聽點擊事件
             if editor_key in st.session_state:
                 edits = st.session_state[editor_key].get('edited_rows', {})
                 action_taken = False
@@ -797,8 +801,9 @@ with tab4:
                         st.session_state.t4_target_sid = wl_df.iloc[row_idx]['股票代號']
                         st.session_state.t4_target_br = wl_df.iloc[row_idx]['追蹤分點']
                         st.session_state.auto_draw = True
+                        st.session_state.chart_render_key += 1
                         action_taken = True
-                        break # 一次只處理一筆
+                        break 
                         
                     # 處理「刪除」點擊
                     if changes.get('刪除', False) == True:
@@ -806,36 +811,50 @@ with tab4:
                         del_br = wl_df.iloc[row_idx]['追蹤分點']
                         st.session_state.watchlist = [item for item in st.session_state.watchlist if not (item['股票代號'] == del_sid and item['追蹤分點'] == del_br)]
                         
-                        # 同步刪除雲端
                         success, msg = save_gsheet_watchlist(current_user, st.session_state.watchlist)
                         if not success:
                             st.error(f"雲端刪除同步失敗: {msg}")
                         action_taken = True
                         break
 
-                # 4. 如果有執行動作，刷新 key 並重整 (徹底打破無限迴圈)
                 if action_taken:
                     st.session_state.wl_refresh_key += 1
                     st.rerun()
 
-   # 執行繪圖
+    st.markdown("---")
+    enable_click_line = st.checkbox("👆 啟用點擊 K 棒自動畫線 (防止手機滑動時誤觸)", value=False)
+
+    # 執行繪圖 (將狀態綁定與實體繪製脫鉤，避免操作輸入框造成圖表消失)
     if draw_btn or st.session_state.auto_draw:
         st.session_state.auto_draw = False 
+        st.session_state.show_chart = True
+        st.session_state.chart_render_key += 1
         
         # 繪圖時同步回寫目前輸入框的狀態，確保下次重整時不會跑掉
         st.session_state.t4_target_sid = t4_sid
         st.session_state.t4_target_br = t4_br_name
         
-        t4_br_id = BROKER_MAP[t4_br_name]['br_id']
+        st.session_state.drawn_sid = t4_sid
+        st.session_state.drawn_br_name = t4_br_name
+        st.session_state.drawn_period = t4_period
+        st.session_state.drawn_days = t4_days
+
+    # 只要曾經畫過，或按過繪圖按鈕，便繼續顯示最後一次成功繪製的圖表
+    if st.session_state.get('show_chart', False):
+        drawn_sid_clean = st.session_state.drawn_sid.strip().upper()
+        drawn_br_name = st.session_state.drawn_br_name
+        drawn_br_id = BROKER_MAP[drawn_br_name]['br_id']
+        drawn_period = st.session_state.drawn_period
+        drawn_days = st.session_state.drawn_days
         
-        with st.spinner(f"為您繪製 {t4_sid_clean} 中..."):
+        with st.spinner(f"為您繪製 {drawn_sid_clean} 中..."):
             try:
-                df_k = get_stock_kline(t4_sid_clean)
+                df_k = get_stock_kline(drawn_sid_clean)
                 
                 if df_k.empty: 
                     st.error("找不到 K 線資料。")
                 else:
-                    df_broker, stock_name = get_fubon_history_and_name(t4_sid_clean, t4_br_id)
+                    df_broker, stock_name = get_fubon_history_and_name(drawn_sid_clean, drawn_br_id)
                     
                     if df_broker.empty:
                         st.info("近期無交易紀錄。")
@@ -844,8 +863,8 @@ with tab4:
                     df_merged['買賣超'] = df_merged['買賣超'].fillna(0) 
                     
                     df_merged.set_index('Date', inplace=True)
-                    if t4_period == "週": df_resampled = df_merged.resample('W-FRI').agg({'Open':'first', 'High':'max', 'Low':'min', 'Close':'last', '買賣超':'sum'})
-                    elif t4_period == "月": df_resampled = df_merged.resample('ME').agg({'Open':'first', 'High':'max', 'Low':'min', 'Close':'last', '買賣超':'sum'})
+                    if drawn_period == "週": df_resampled = df_merged.resample('W-FRI').agg({'Open':'first', 'High':'max', 'Low':'min', 'Close':'last', '買賣超':'sum'})
+                    elif drawn_period == "月": df_resampled = df_merged.resample('ME').agg({'Open':'first', 'High':'max', 'Low':'min', 'Close':'last', '買賣超':'sum'})
                     else: df_resampled = df_merged.copy()
                     
                     df_resampled = df_resampled.dropna(subset=['Close']).reset_index()
@@ -859,15 +878,15 @@ with tab4:
                     macd1, sig1, hist1 = calculate_macd(df_resampled, int(macd1_f), int(macd1_s), int(macd1_sig))
                     macd2, sig2, hist2 = calculate_macd(df_resampled, int(macd2_f), int(macd2_s), int(macd2_sig))
                     
-                    df_plot = df_resampled.tail(int(t4_days)).copy()
+                    df_plot = df_resampled.tail(int(drawn_days)).copy()
                     
-                    df_plot['M1_hist'] = hist1.tail(int(t4_days))
-                    df_plot['M1_macd'] = macd1.tail(int(t4_days))
-                    df_plot['M1_sig'] = sig1.tail(int(t4_days))
+                    df_plot['M1_hist'] = hist1.tail(int(drawn_days))
+                    df_plot['M1_macd'] = macd1.tail(int(drawn_days))
+                    df_plot['M1_sig'] = sig1.tail(int(drawn_days))
                     
-                    df_plot['M2_hist'] = hist2.tail(int(t4_days))
-                    df_plot['M2_macd'] = macd2.tail(int(t4_days))
-                    df_plot['M2_sig'] = sig2.tail(int(t4_days))
+                    df_plot['M2_hist'] = hist2.tail(int(drawn_days))
+                    df_plot['M2_macd'] = macd2.tail(int(drawn_days))
+                    df_plot['M2_sig'] = sig2.tail(int(drawn_days))
 
                     all_data = []
                     for i, row in df_plot.iterrows():
@@ -932,7 +951,7 @@ with tab4:
                                 watermark: {{
                                     color: 'rgba(255, 255, 255, 0.08)',
                                     visible: true,
-                                    text: '{t4_sid_clean} {stock_name}',
+                                    text: '{drawn_sid_clean} {stock_name}',
                                     fontSize: 80,
                                     horzAlign: 'center',
                                     vertAlign: 'center',
@@ -1022,12 +1041,12 @@ with tab4:
                                 const vColor = d.vol >= 0 ? '#ef5350' : '#26a69a';
                                 
                                 let html = `
-                                    <div class="lg-title">{t4_sid_clean} {stock_name} | ${{timeStr}} ${{getDayOfWeek(timeStr)}}</div>
+                                    <div class="lg-title">{drawn_sid_clean} {stock_name} | ${{timeStr}} ${{getDayOfWeek(timeStr)}}</div>
                                     <div class="lg-row"><span class="lg-label">開盤</span><span style="color:white;">${{d.open.toFixed(2)}}</span></div>
                                     <div class="lg-row"><span class="lg-label">最高</span><span style="color:#ef5350;">${{d.high.toFixed(2)}}</span></div>
                                     <div class="lg-row"><span class="lg-label">最低</span><span style="color:#26a69a;">${{d.low.toFixed(2)}}</span></div>
                                     <div class="lg-row"><span class="lg-label">收盤</span><span style="color:white;font-weight:bold;">${{d.close.toFixed(2)}}</span></div>
-                                    <div class="lg-vol"><span class="lg-label">買賣超 ({t4_br_name})</span> <span style="color:${{vColor}};">${{d.vol}} 張</span></div>
+                                    <div class="lg-vol"><span class="lg-label">買賣超 ({drawn_br_name})</span> <span style="color:${{vColor}};">${{d.vol}} 張</span></div>
                                 `;
 
                                 if(d.h1 !== undefined) html += `<div class="lg-macd"><b>短 MACD:</b> 柱 <span style="color:${{d.h1>=0?'#ef5350':'#26a69a'}}">${{d.h1.toFixed(2)}}</span> | 快 <span style="color:#FFD600">${{d.m1.toFixed(2)}}</span> | 慢 <span style="color:#00E676">${{d.s1.toFixed(2)}}</span></div>`;
@@ -1037,10 +1056,13 @@ with tab4:
                             }});
 
                             // ==========================================
-                            // 🆕 新增：點擊 K 棒自動畫出水平射線 (支撐/壓力線)
+                            // 🆕 點擊 K 棒自動畫出水平射線 (支撐/壓力線) 防誤觸版
                             // ==========================================
+                            const enableClickLine = {'true' if enable_click_line else 'false'};
+                            
                             chart.subscribeClick(param => {{
-                                // 確保有點擊到圖表有效範圍
+                                // 確保有開啟功能並點擊到圖表有效範圍
+                                if(!enableClickLine) return;
                                 if(!param.time || param.point === undefined || param.point.y < 0) return;
 
                                 let timeStr = param.time;
@@ -1071,11 +1093,11 @@ with tab4:
                                     lineTitle = '支撐 ' + targetPrice.toFixed(2);
                                 }}
 
-                                // 創建一個向右延伸的射線 (利用 LineSeries 做出兩點成線)
+                                // 創建一個向右延伸的射線
                                 const raySeries = chart.addLineSeries({{
                                     color: lineColor,
                                     lineWidth: 2,
-                                    lineStyle: 2, // 虛線風格
+                                    lineStyle: 2, 
                                     lastValueVisible: true,
                                     priceLineVisible: false,
                                     crosshairMarkerVisible: false,
@@ -1105,6 +1127,7 @@ with tab4:
                             
                             setTimeout(() => {{ chart.timeScale().fitContent(); }}, 100);
                         </script>
+                        <!-- Render Key: {st.session_state.chart_render_key} -->
                     </body>
                     </html>
                     """
