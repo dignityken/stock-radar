@@ -763,33 +763,51 @@ with tab4:
 
     if st.session_state.watchlist:
         with st.expander(f"⭐ 【{current_user}】的專屬主力清單", expanded=True):
+            
+            # 1. 建立清單專屬的動態 Key (用來強制清空打勾狀態)
+            if 'wl_refresh_key' not in st.session_state:
+                st.session_state.wl_refresh_key = 0
+                
             wl_df = pd.DataFrame(st.session_state.watchlist)
             wl_df.insert(0, '載入', False)
             wl_df['刪除'] = False
             wl_config = {"載入": st.column_config.CheckboxColumn("載入繪圖"), "刪除": st.column_config.CheckboxColumn("刪除")}
-            edited_wl = st.data_editor(wl_df, hide_index=True, column_config=wl_config, use_container_width=True, key="wl_editor")
             
-            # 🌟 從清單載入繪圖 (移除報錯的強制覆寫邏輯)
-            if not edited_wl[edited_wl['載入'] == True].empty:
-                load_sid = edited_wl[edited_wl['載入'] == True].iloc[0]['股票代號']
-                load_br = edited_wl[edited_wl['載入'] == True].iloc[0]['追蹤分點']
+            # 2. 將動態 key 綁定給 data_editor
+            editor_key = f"wl_editor_{st.session_state.wl_refresh_key}"
+            st.data_editor(wl_df, hide_index=True, column_config=wl_config, use_container_width=True, key=editor_key)
+            
+            # 3. 監聽點擊事件
+            if editor_key in st.session_state:
+                edits = st.session_state[editor_key].get('edited_rows', {})
+                action_taken = False
                 
-                st.session_state.t4_target_sid = load_sid
-                st.session_state.t4_target_br = load_br
-                st.session_state.auto_draw = True
-                st.rerun()
-                
-            # 🌟 GSheets: 刪除清單
-            if not edited_wl[edited_wl['刪除'] == True].empty:
-                del_sid = edited_wl[edited_wl['刪除'] == True].iloc[0]['股票代號']
-                del_br = edited_wl[edited_wl['刪除'] == True].iloc[0]['追蹤分點']
-                st.session_state.watchlist = [item for item in st.session_state.watchlist if not (item['股票代號'] == del_sid and item['追蹤分點'] == del_br)]
-                
-                # 同步刪除雲端
-                success, msg = save_gsheet_watchlist(current_user, st.session_state.watchlist)
-                if not success:
-                    st.error(f"雲端刪除同步失敗: {msg}")
-                st.rerun()
+                for row_idx, changes in edits.items():
+                    # 處理「載入」點擊
+                    if changes.get('載入', False) == True:
+                        st.session_state.t4_target_sid = wl_df.iloc[row_idx]['股票代號']
+                        st.session_state.t4_target_br = wl_df.iloc[row_idx]['追蹤分點']
+                        st.session_state.auto_draw = True
+                        action_taken = True
+                        break # 一次只處理一筆
+                        
+                    # 處理「刪除」點擊
+                    if changes.get('刪除', False) == True:
+                        del_sid = wl_df.iloc[row_idx]['股票代號']
+                        del_br = wl_df.iloc[row_idx]['追蹤分點']
+                        st.session_state.watchlist = [item for item in st.session_state.watchlist if not (item['股票代號'] == del_sid and item['追蹤分點'] == del_br)]
+                        
+                        # 同步刪除雲端
+                        success, msg = save_gsheet_watchlist(current_user, st.session_state.watchlist)
+                        if not success:
+                            st.error(f"雲端刪除同步失敗: {msg}")
+                        action_taken = True
+                        break
+
+                # 4. 如果有執行動作，刷新 key 並重整 (徹底打破無限迴圈)
+                if action_taken:
+                    st.session_state.wl_refresh_key += 1
+                    st.rerun()
 
     # 執行繪圖
     if draw_btn or st.session_state.auto_draw:
