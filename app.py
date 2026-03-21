@@ -89,23 +89,8 @@ if 't4_br_input' not in st.session_state: st.session_state.t4_br_input = "兆豐
 if 'auto_draw' not in st.session_state: st.session_state.auto_draw = False
 if 'watchlist' not in st.session_state: st.session_state.watchlist = []
 if 'custom_hlines' not in st.session_state: st.session_state.custom_hlines = []
-
-def send_to_tab4(sid, br_name):
-    st.session_state.t4_sid_input = str(sid).strip().upper()
-    clean_br = str(br_name).replace("亚","亞").strip()
-    matched_br = None
-    if clean_br in BROKER_MAP:
-        matched_br = clean_br
-    else:
-        for k in BROKER_MAP.keys():
-            if clean_br in k or k in clean_br:
-                matched_br = k
-                break
-    if matched_br:
-        st.session_state.t4_br_input = matched_br
-        
-    st.session_state.auto_draw = True
-    st.rerun()
+if 'jump_sid' not in st.session_state: st.session_state.jump_sid = None
+if 'jump_br_name' not in st.session_state: st.session_state.jump_br_name = None
 
 # ==========================================
 # 資料載入與處理函數
@@ -255,7 +240,7 @@ def safe_float(val):
     return float(val)
 
 # ==========================================
-# 1. UI 介面設定
+# UI 介面設定
 # ==========================================
 tab1, tab2, tab3, tab4 = st.tabs(["🚀 特定分點", "📊 股票代號", "📍 地緣券商", "📊 主力 K 線圖"])
 
@@ -335,30 +320,29 @@ with tab1:
                 df_show['extracted_stock_id'] = df_show['股票名稱'].apply(get_stock_id)
                 df_show['K線圖'] = df_show['extracted_stock_id'].apply(lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zcw/zcw1_{sid}.djhtm" if sid else "")
                 df_show['分點明細'] = df_show['extracted_stock_id'].apply(lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={sid}&BHID={sel_br_id}&b={sel_br_id}&C=3" if sid else "")
-                df_show['畫圖'] = False 
+                df_show['送至 Tab4 繪圖'] = False 
                 
                 col_buy_name = '買進金額' if '金額' in t1_u else '買進張數'
                 col_sell_name = '賣出金額' if '金額' in t1_u else '賣出張數'
 
-                df_show = df_show[['畫圖', '股票名稱', 'K線圖', col_buy_name, col_sell_name, '總額', '買%', '賣%', '分點明細', 'extracted_stock_id']]
+                df_show = df_show[['送至 Tab4 繪圖', '股票名稱', 'K線圖', col_buy_name, col_sell_name, '總額', '買%', '賣%', '分點明細', 'extracted_stock_id']]
                 col_config = {
                     "K線圖": st.column_config.LinkColumn("網頁K線", display_text="📈"),
                     "分點明細": st.column_config.LinkColumn("網頁明細", display_text="🏦"),
-                    "畫圖": st.column_config.CheckboxColumn("送至Tab4"),
+                    "送至 Tab4 繪圖": st.column_config.CheckboxColumn("送至 Tab4 繪圖"),
                     "extracted_stock_id": None 
                 }
                 
                 editor_key = f"editor_{key_prefix}"
-                st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=editor_key)
+                edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=editor_key)
                 
-                if editor_key in st.session_state:
-                    edited_rows = st.session_state[editor_key].get('edited_rows', {})
-                    for row_idx, edits in edited_rows.items():
-                        if edits.get('畫圖', False) == True:
-                            sid_clicked = df_show.iloc[row_idx]['extracted_stock_id']
-                            del st.session_state[editor_key]  
-                            send_to_tab4(sid_clicked, sel_br_l)
-                            break
+                clicked_rows = edited_df[edited_df['送至 Tab4 繪圖'] == True]
+                if not clicked_rows.empty:
+                    sid_clicked = clicked_rows.iloc[0]['extracted_stock_id']
+                    st.session_state.jump_sid = sid_clicked
+                    st.session_state.jump_br_name = sel_br_l
+                    st.session_state.auto_draw = True
+                    st.success(f"✅ 已將 {sid_clicked} 與 {sel_br_l} 參數送到 Tab4！請手動切換至「📊 主力 K 線圖」。")
 
         col_b = '買進金額' if '金額' in t1_u else '買進張數'
         col_s = '賣出金額' if '金額' in t1_u else '賣出張數'
@@ -367,8 +351,9 @@ with tab1:
         st.markdown(f"### 🟢 大戶倒貨中 - 共 {len(st.session_state.t1_sell_df)} 檔")
         display_table_with_button(st.session_state.t1_sell_df.sort_values(by=col_s, ascending=False).head(999 if show_full else 10), "t1_sell")
 
-# --- Tab 2 ---
+# --- Tab 2 (使用您提供的完美解析代碼) ---
 with tab2:
+    st.markdown("### 📈 誰在買賣這檔股票？")
     c1, c2, c3 = st.columns(3)
     with c1: t2_sid = st.text_input("股票代號", "2408", key="t2_s")
     with c2: t2_sd = st.date_input("開始", datetime.date.today()-datetime.timedelta(days=7), key="t2_sd_in")
@@ -380,11 +365,10 @@ with tab2:
     with c6: t2_v = st.number_input("最低張數", 0, 1000000, 10, step=1, key="t2_v_in")
     with c7: st.write(""); show_full_t2 = st.checkbox("顯示完整清單", value=False, key="t2_full")
 
-    t2_sid_clean = t2_sid.strip().replace(" ", "").upper()
-
     if st.button("開始籌碼追蹤 🚀", key="t2_btn"):
-        st.session_state.t2_searched = True
-        if not t2_sid_clean.isalnum(): st.error("代號錯誤。")
+        t2_sid_clean = t2_sid.strip().replace(" ", "").upper()
+        if not t2_sid_clean.isalnum(): 
+            st.error("股票代號必須是字母數字組合。")
         else:
             url = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco.djhtm?a={t2_sid_clean}&e={t2_sd.strftime('%Y-%m-%d')}&f={t2_ed.strftime('%Y-%m-%d')}"
             try:
@@ -393,27 +377,12 @@ with tab2:
                 tables = pd.read_html(StringIO(res.text))
                 df_all = pd.DataFrame()
                 
-                # ✅ 【完美修復 TAB 2 過濾】動態尋找券商欄位，無視 8 欄或 10 欄的變動！
+                # 完全遵照您的正常版解析法
                 for tb in tables:
-                    if tb.shape[1] >= 6:
-                        # 檢查這張表有沒有「券商」字眼
-                        is_broker_table = False
-                        for col in tb.columns:
-                            if '券商' in str(col) or '券商' in str(tb[col].iloc[0]):
-                                is_broker_table = True
-                                break
-                        
-                        if is_broker_table:
-                            # 如果是標準的 10 欄
-                            if tb.shape[1] == 10:
-                                l = tb.iloc[:, [0,1,2]].copy(); l.columns = ['券商','買','賣']
-                                r = tb.iloc[:, [5,6,7]].copy(); r.columns = ['券商','買','賣']
-                                df_all = pd.concat([df_all, l, r], ignore_index=True)
-                            # 如果是偶爾縮水的 8 欄
-                            elif tb.shape[1] >= 8:
-                                l = tb.iloc[:, [0,1,2]].copy(); l.columns = ['券商','買','賣']
-                                r = tb.iloc[:, [4,5,6]].copy(); r.columns = ['券商','買','賣']
-                                df_all = pd.concat([df_all, l, r], ignore_index=True)
+                    if tb.shape[1] == 10:
+                        l = tb.iloc[:,[0,1,2]].copy(); l.columns=['券商','買','賣']
+                        r = tb.iloc[:,[5,6,7]].copy(); r.columns=['券商','買','賣']
+                        df_all = pd.concat([l, r])
                 
                 if not df_all.empty:
                     df_all = df_all.dropna()
@@ -429,10 +398,12 @@ with tab2:
                     else:
                         st.session_state.t2_buy_df = df_all[(df_all['買進%'] >= t2_p) & (df_all['買'] >= t2_v)].copy()
                         st.session_state.t2_sell_df = df_all[(df_all['賣出%'] >= t2_p) & (df_all['賣'] >= t2_v)].copy()
-                else: st.warning("無資料。")
+                else: st.warning("未找到資料。請檢查股票代號或日期區間。")
             except Exception as e: st.error(f"發生錯誤: {e}")
 
-    if st.session_state.t2_searched:
+    if st.session_state.get('t2_buy_df') is not None and not st.session_state.t2_buy_df.empty:
+        t2_sid_clean = t2_sid.strip().replace(" ", "").upper()
+        
         def get_link_t2(broker_name):
             name_cleaned = broker_name.replace("亞","亞").strip()
             info = BROKER_MAP.get(name_cleaned)
@@ -446,70 +417,75 @@ with tab2:
             if not df_to_show.empty:
                 df_show = df_to_show.copy()
                 df_show['網頁明細'] = df_show['券商'].apply(get_link_t2)
-                df_show['畫圖'] = False 
-                df_show = df_show[['畫圖', '券商', '買', '賣', '合計', '買進%', '賣出%', '網頁明細']]
+                df_show['送至 Tab4 繪圖'] = False 
+                df_show = df_show[['送至 Tab4 繪圖', '券商', '買', '賣', '合計', '買進%', '賣出%', '網頁明細']]
                 col_config = {
-                    "網頁明細": st.column_config.LinkColumn("網頁明細", display_text="🏦"),
-                    "畫圖": st.column_config.CheckboxColumn("送至Tab4")
+                    "網頁明細": st.column_config.LinkColumn("網頁明細", display_text="🏦", help="外連富邦明細"),
+                    "送至 Tab4 繪圖": st.column_config.CheckboxColumn("送至 Tab4 繪圖", help="打勾後請手動切換至分頁四")
                 }
-                
-                editor_key = f"editor_{key_prefix}"
-                st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=editor_key)
-                
-                if editor_key in st.session_state:
-                    edited_rows = st.session_state[editor_key].get('edited_rows', {})
-                    for row_idx, edits in edited_rows.items():
-                        if edits.get('畫圖', False) == True:
-                            br_clicked = df_show.iloc[row_idx]['券商']
-                            del st.session_state[editor_key]
-                            send_to_tab4(t2_sid_clean, br_clicked)
-                            break
+                edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=f"editor_{key_prefix}")
+                clicked_rows = edited_df[edited_df['送至 Tab4 繪圖'] == True]
+                if not clicked_rows.empty:
+                    br_clicked = clicked_rows.iloc[0]['券商']
+                    st.session_state.jump_sid = t2_sid_clean
+                    st.session_state.jump_br_name = br_clicked
+                    st.session_state.auto_draw = True
+                    st.success(f"✅ 已將 {t2_sid_clean} 與 {br_clicked} 參數送到 Tab4！請在最上方手動點擊「📊 主力 K 線圖」分頁。")
 
         st.subheader("🔴 吃貨主力分點")
         display_table_with_button_t2(st.session_state.t2_buy_df.sort_values('買', ascending=False).head(999 if show_full_t2 else 10), "t2_buy")
         st.subheader("🟢 倒貨主力分點")
         display_table_with_button_t2(st.session_state.t2_sell_df.sort_values('賣', ascending=False).head(999 if show_full_t2 else 10), "t2_sell")
 
-# --- Tab 3 ---
+# --- Tab 3 (使用您提供的完美解析代碼) ---
 with tab3:
-    # ✅ 【完美修復 TAB 3 下拉錯亂】給右邊選單加入動態 Key，保證同步更新！
+    st.markdown("### 📍 尋找地緣/同名分點進出")
+    st.caption("透過分點名稱後綴（例如：城中、三重、信義）跨券商尋找特定地區的買賣神人。")
     c1, c2 = st.columns(2)
     with c1:
         sorted_loc_keys = sorted(GEO_MAP.keys())
-        sel_loc = st.selectbox("選擇地緣關鍵字 (下拉或輸入關鍵字搜尋)", sorted_loc_keys, key="t3_loc_sel")
+        default_loc_idx = sorted_loc_keys.index('城中') if '城中' in sorted_loc_keys else 0
+        sel_loc = st.selectbox("選擇地緣關鍵字 (支援手動輸入搜尋)", sorted_loc_keys, index=default_loc_idx, key="t3_loc_sel")
     with c2:
         loc_branches = GEO_MAP[sel_loc]
-        # 動態 Key 防止錯亂
-        sel_t3_br_l = st.selectbox("選擇特定分點", sorted(loc_branches.keys()), key=f"t3_br_sel_{sel_loc}")
-        sel_t3_br_id = loc_branches[sel_t3_br_l]['br_id']
-        sel_t3_hq_id = loc_branches[sel_t3_br_l]['hq_id']
+        sorted_loc_br_keys = sorted(loc_branches.keys())
+        sel_t3_br_l = st.selectbox("選擇該區特定分點", sorted_loc_br_keys, key="t3_br_sel")
+        sel_t3_br_info = loc_branches[sel_t3_br_l]
+        sel_t3_hq_id = sel_t3_br_info['hq_id']
+        sel_t3_br_id = sel_t3_br_info['br_id']
 
     c3, c4, c5 = st.columns(3)
     with c3: t3_sd = st.date_input("區間起點", datetime.date.today()-datetime.timedelta(days=7), key="t3_sd")
     with c4: t3_ed = st.date_input("區間終點", datetime.date.today(), key="t3_ed")
-    with c5: t3_u = st.radio("單位", ["張數", "金額"], horizontal=True, key="t3_unit")
+    with c5: t3_u = st.radio("統計單位", ["張數", "金額"], horizontal=True, key="t3_unit")
 
     c6, c7, c8 = st.columns([1.5, 1, 1])
-    with c6: t3_mode = st.radio("篩選", ["嚴格", "濾網"], index=1, horizontal=True, key="t3_mode")
-    with c7: t3_p = st.number_input("佔比 >= (%)", 0.0, 100.0, 95.0, key="t3_pct")
-    with c8: st.write(""); show_full_t3 = st.checkbox("完整清單", value=False, key="t3_full")
+    with c6: t3_mode = st.radio("篩選條件", ["嚴格模式 (只買不賣)", "濾網模式 (自訂佔比)"], index=1, horizontal=True, key="t3_mode")
+    with c7: t3_p = st.number_input("佔比 >= (%)", 0.0, 100.0, 95.0, step=1.0, key="t3_pct")
+    with c8: st.write(""); show_full_t3 = st.checkbox("顯示完整清單", value=False, key="t3_full")
 
     if st.button("啟動地緣雷達 📡", key="t3_go"):
-        st.session_state.t3_searched = True
         sd_s, ed_s = t3_sd.strftime('%Y-%m-%d'), t3_ed.strftime('%Y-%m-%d')
-        c_param = "B" if '金額' in t3_u else "E"
-        col_buy = '買進金額' if '金額' in t3_u else '買進張數'
-        col_sell = '賣出金額' if '金額' in t3_u else '賣出張數'
+        is_amount = '金額' in t3_u
+        c_param = "B" if is_amount else "E"
+        col_buy = '買進金額' if is_amount else '買進張數'
+        col_sell = '賣出金額' if is_amount else '賣出張數'
         url = f"https://fubon-ebrokerdj.fbs.com.tw/z/zg/zgb/zgb0.djhtm?a={sel_t3_hq_id}&b={sel_t3_br_id}&c={c_param}&e={sd_s}&f={ed_s}"
         try:
             res = requests.get(url, headers=HEADERS, verify=False, timeout=15)
             res.encoding = 'big5'
+            html_text = res.text
             def extract_stock_name_from_script(match):
-                m = re.search(r"GenLink2stk\s*\(\s*['\"](?:AS)?([^'\"]+)['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)", match.group(0), re.IGNORECASE)
-                if m: return f"{m.group(1).strip()}{m.group(2).strip()}"
+                script_content = match.group(0)
+                m = re.search(r"GenLink2stk\s*\(\s*['\"](?:AS)?([^'\"]+)['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)", script_content, re.IGNORECASE)
+                if m:
+                    stock_id = m.group(1).strip()
+                    stock_name = m.group(2).strip()
+                    return f"{stock_id}{stock_name}"
                 return ""
-            processed_html_text = re.sub(r"<script[^>]*>(?:(?!</script>).)*GenLink2stk\s*\([^)]+\).*?</script>", extract_stock_name_from_script, res.text, flags=re.IGNORECASE | re.DOTALL)
+            processed_html_text = re.sub(r"<script[^>]*>(?:(?!</script>).)*GenLink2stk\s*\([^)]+\).*?</script>", extract_stock_name_from_script, html_text, flags=re.IGNORECASE | re.DOTALL)
             
+            # 完全遵照您的正常版解析法
             tables = pd.read_html(StringIO(processed_html_text))
             df_all = pd.DataFrame()
             for tb in tables:
@@ -525,9 +501,11 @@ with tab3:
 
             if not df_all.empty:
                 df_all['股票名稱'] = df_all['股票名稱'].astype(str).str.strip()
-                df_all = df_all[~df_all['股票名稱'].str.contains('名稱|買進|賣出|合計|說明|註|差額|請選擇|nan|NaN|None|^\s*$', na=False)]
+                invalid_patterns = ['名稱', '買進', '賣出', '合計', '說明', '註', '差額', '請選擇', 'nan', 'NaN', 'None', r'^\s*$']
+                df_all = df_all[~df_all['股票名稱'].str.contains('|'.join(invalid_patterns), na=False)]
                 df_all = df_all[df_all['股票名稱'].apply(lambda x: bool(get_stock_id(x)))].copy()
-                for c in [col_buy, col_sell]: df_all[c] = pd.to_numeric(df_all[c].astype(str).str.replace(',',''), errors='coerce').fillna(0)
+                for c in [col_buy, col_sell]:
+                    df_all[c] = pd.to_numeric(df_all[c].astype(str).str.replace(',',''), errors='coerce').fillna(0)
                 df_all['總額'] = df_all[col_buy] + df_all[col_sell]
                 df_all = df_all[df_all['總額'] > 0].copy()
                 df_all['買%'] = (df_all[col_buy] / df_all['總額'] * 100).round(1)
@@ -539,57 +517,74 @@ with tab3:
                 else:
                     st.session_state.t3_buy_df = df_all[df_all['買%'] >= t3_p].copy()
                     st.session_state.t3_sell_df = df_all[df_all['賣%'] >= t3_p].copy()
-            else: st.warning("無資料。")
+            else: st.warning("抓取不到數據。請檢查股票代號或券商分點是否正確。")
         except Exception as e: st.error(f"發生錯誤: {e}")
 
-    if st.session_state.t3_searched:
+    if st.session_state.get('t3_buy_df') is not None and not st.session_state.t3_buy_df.empty:
+        is_amount = '金額' in t3_u
+        col_buy = '買進金額' if is_amount else '買進張數'
+        col_sell = '賣出金額' if is_amount else '賣出張數'
+        
         def display_table_with_button_t3(df_to_show, key_prefix):
             if not df_to_show.empty:
                 df_show = df_to_show.copy()
                 df_show['extracted_stock_id'] = df_show['股票名稱'].apply(get_stock_id)
                 df_show['K線圖'] = df_show['extracted_stock_id'].apply(lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zcw/zcw1_{sid}.djhtm" if sid else "")
                 df_show['分點明細'] = df_show['extracted_stock_id'].apply(lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={sid}&BHID={sel_t3_br_id}&b={sel_t3_br_id}&C=3" if sid else "")
-                df_show['畫圖'] = False 
-                col_b = '買進金額' if '金額' in t3_u else '買進張數'
-                col_s = '賣出金額' if '金額' in t3_u else '賣出張數'
-                df_show = df_show[['畫圖', '股票名稱', 'K線圖', col_b, col_s, '總額', '買%', '賣%', '分點明細', 'extracted_stock_id']]
+                df_show['帶入K線'] = False 
+                df_show = df_show[['帶入K線', '股票名稱', 'K線圖', col_buy, col_sell, '總額', '買%', '賣%', '分點明細', 'extracted_stock_id']]
                 col_config = {
                     "K線圖": st.column_config.LinkColumn("網頁K線", display_text="📈"),
                     "分點明細": st.column_config.LinkColumn("網頁明細", display_text="🏦"),
-                    "畫圖": st.column_config.CheckboxColumn("送至Tab4"),
+                    "帶入K線": st.column_config.CheckboxColumn("送至 Tab4 繪圖"),
                     "extracted_stock_id": None 
                 }
-                
-                editor_key = f"editor_{key_prefix}"
-                st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=editor_key)
-                
-                if editor_key in st.session_state:
-                    edited_rows = st.session_state[editor_key].get('edited_rows', {})
-                    for row_idx, edits in edited_rows.items():
-                        if edits.get('畫圖', False) == True:
-                            sid_clicked = df_show.iloc[row_idx]['extracted_stock_id']
-                            del st.session_state[editor_key]
-                            send_to_tab4(sid_clicked, sel_t3_br_l)
-                            break
+                edited_df = st.data_editor(df_show, hide_index=True, column_config=col_config, use_container_width=True, key=f"editor_{key_prefix}")
+                clicked_rows = edited_df[edited_df['帶入K線'] == True]
+                if not clicked_rows.empty:
+                    sid_clicked = clicked_rows.iloc[0]['extracted_stock_id']
+                    st.session_state.jump_sid = sid_clicked
+                    st.session_state.jump_br_name = sel_t3_br_l
+                    st.session_state.auto_draw = True
+                    st.success(f"✅ 已將 {sid_clicked} 與 {sel_t3_br_l} 參數送到 Tab4！請手動切換至「📊 主力 K 線圖」。")
 
-        col_b = '買進金額' if '金額' in t3_u else '買進張數'
-        col_s = '賣出金額' if '金額' in t3_u else '賣出張數'
-        st.markdown(f"### 🔴 該分點吃貨中 - 共 {len(st.session_state.t3_buy_df)} 檔")
-        display_table_with_button_t3(st.session_state.t3_buy_df.sort_values(by=col_b, ascending=False).head(999 if show_full_t3 else 10), "t3_buy")
-        st.markdown(f"### 🟢 該分點倒貨中 - 共 {len(st.session_state.t3_sell_df)} 檔")
-        display_table_with_button_t3(st.session_state.t3_sell_df.sort_values(by=col_s, ascending=False).head(999 if show_full_t3 else 10), "t3_sell")
+        sd_s, ed_s = t3_sd.strftime('%Y-%m-%d'), t3_ed.strftime('%Y-%m-%d')
+        st.subheader(f"🕵️ 地緣雷達結果：{sel_t3_br_l}")
+        st.caption(f"📌 區間：{sd_s} ~ {ed_s} | 單位：{t3_u}")
+        st.markdown(f"### 🔴 該分點吃貨中 (極端買進) - 共 {len(st.session_state.t3_buy_df)} 檔")
+        display_table_with_button_t3(st.session_state.t3_buy_df.sort_values(by=col_buy, ascending=False).head(999 if show_full_t3 else 10), "t3_buy")
+        st.markdown(f"### 🟢 該分點倒貨中 (極端賣出) - 共 {len(st.session_state.t3_sell_df)} 檔")
+        display_table_with_button_t3(st.session_state.t3_sell_df.sort_values(by=col_sell, ascending=False).head(999 if show_full_t3 else 10), "t3_sell")
 
-# --- Tab 4 (主力 K 線圖 - 完美保留 Lightweight Charts 版) ---
+# --- Tab 4 (解決重疊與畫線問題的完美版) ---
 with tab4:
+    # 接收來自其他 Tab 的跳轉指令
+    if st.session_state.get('jump_sid'):
+        st.session_state.t4_sid_input = st.session_state.jump_sid
+        matched_br = st.session_state.jump_br_name.replace("亚","亞").strip()
+        if matched_br in BROKER_MAP:
+            st.session_state.t4_br_input = matched_br
+        else:
+            for k in BROKER_MAP.keys():
+                if matched_br in k or k in matched_br:
+                    st.session_state.t4_br_input = k
+                    break
+        st.session_state.jump_sid = None
+        st.session_state.jump_br_name = None
+
     if st.session_state.auto_draw:
-        st.success("✅ 資料已同步，請直接查看下方圖表。")
+        st.success("✅ 參數已帶入！請直接查看下方圖表。")
         
     col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns([1, 1.5, 1, 1, 1])
+    
     with col_t1:
-        t4_sid = st.text_input("股票代號", key="t4_sid_input")
+        t4_sid_val = st.session_state.get('t4_sid_input', "6488")
+        t4_sid = st.text_input("股票代號", value=t4_sid_val, key="t4_sid_ui_real")
     with col_t2:
         all_br_names = sorted(list(BROKER_MAP.keys()))
-        t4_br_name = st.selectbox("搜尋分點", all_br_names, key="t4_br_input")
+        t4_br_val = st.session_state.get('t4_br_input', "兆豐-忠孝")
+        idx = all_br_names.index(t4_br_val) if t4_br_val in all_br_names else 0
+        t4_br_name = st.selectbox("搜尋分點", all_br_names, index=idx, key="t4_br_ui_real")
     with col_t3: 
         t4_period = st.radio("週期", ["日", "週", "月"], horizontal=True)
     with col_t4: 
@@ -602,19 +597,19 @@ with tab4:
     with col_x1:
         fav_btn = st.button("❤️ 存入清單", use_container_width=True)
     with col_x2_1:
-        # ✅ 把畫線功能切開，新增實體按鈕保證 100% 觸發
-        hline_val = st.number_input("📏 水平線價格", value=0.0, step=1.0)
+        # ✅ 水平線獨立輸入框
+        hline_val = st.number_input("📏 水平線價格", value=0.0, step=1.0, key="hline_val_input")
     with col_x2_2:
         st.write("")
+        # ✅ 按下實體按鈕 100% 觸發畫線
         if st.button("➕ 加入畫線", use_container_width=True):
             if hline_val > 0 and hline_val not in st.session_state.custom_hlines:
                 st.session_state.custom_hlines.append(hline_val)
-                st.session_state.auto_draw = True
-                st.rerun()
+            st.session_state.auto_draw = True
+            st.rerun()
     with col_x3:
         st.write("")
-        clear_btn = st.button("🗑️ 清除所有畫線", use_container_width=True)
-        if clear_btn:
+        if st.button("🗑️ 清除所有畫線", use_container_width=True):
             st.session_state.custom_hlines = []
             st.session_state.auto_draw = True
             st.rerun()
@@ -658,7 +653,10 @@ with tab4:
             edited_wl = st.data_editor(wl_df, hide_index=True, column_config=wl_config, use_container_width=True, key="wl_editor")
             
             if not edited_wl[edited_wl['載入'] == True].empty:
-                send_to_tab4(edited_wl[edited_wl['載入'] == True].iloc[0]['股票代號'], edited_wl[edited_wl['載入'] == True].iloc[0]['追蹤分點'])
+                st.session_state.t4_sid_input = edited_wl[edited_wl['載入'] == True].iloc[0]['股票代號']
+                st.session_state.t4_br_input = edited_wl[edited_wl['載入'] == True].iloc[0]['追蹤分點']
+                st.session_state.auto_draw = True
+                st.rerun()
             if not edited_wl[edited_wl['刪除'] == True].empty:
                 del_sid = edited_wl[edited_wl['刪除'] == True].iloc[0]['股票代號']
                 del_br = edited_wl[edited_wl['刪除'] == True].iloc[0]['追蹤分點']
@@ -668,11 +666,15 @@ with tab4:
     # 執行繪圖
     if draw_btn or st.session_state.auto_draw:
         st.session_state.auto_draw = False 
+        
+        # 同步回寫 UI
+        st.session_state.t4_sid_input = t4_sid
+        st.session_state.t4_br_input = t4_br_name
+        
         t4_br_id = BROKER_MAP[t4_br_name]['br_id']
         
         with st.spinner(f"為您繪製 {t4_sid_clean} 中..."):
             try:
-                # ✅ 具有快取，畫線時不會重抓浪費時間
                 df_k = get_stock_kline(t4_sid_clean)
                 
                 if df_k.empty: 
@@ -738,6 +740,7 @@ with tab4:
 
                     hlines_js_array = json.dumps(st.session_state.custom_hlines)
 
+                    # ✅ 完美解決圖表重疊問題 (Scale Margins) 與畫線必現問題 (LineSeries)
                     html_code = f"""
                     <!DOCTYPE html>
                     <html>
@@ -798,6 +801,12 @@ with tab4:
                             
                             const chart = LightweightCharts.createChart(document.getElementById('chart'), layoutOptions);
                             
+                            // 🔑 關鍵佈局修正：將圖表切成互不重疊的四個區塊！
+                            // 1. K線主圖區塊 (佔畫面上半部)
+                            chart.priceScale('right').applyOptions({{
+                                scaleMargins: {{ top: 0.02, bottom: 0.45 }}
+                            }});
+
                             // K線
                             const seriesK = chart.addCandlestickSeries({{ upColor: '#ef5350', downColor: '#26a69a', borderVisible: false, wickUpColor: '#ef5350', wickDownColor: '#26a69a' }});
                             seriesK.setData(rawData.map(d => ({{time: d.time, open: d.open, high: d.high, low: d.low, close: d.close}})));
@@ -810,39 +819,44 @@ with tab4:
                             const bbDn = chart.addLineSeries({{ color: 'rgba(255, 255, 255, 0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             bbDn.setData(rawData.filter(d => d.bbd !== undefined).map(d => ({{time: d.time, value: d.bbd}})));
                             
-                            // 買賣超
-                            const seriesVol = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: '', scaleMargins: {{ top: 0.85, bottom: 0 }}, lastValueVisible: false, priceLineVisible: false }});
+                            // 2. 買賣超區塊 (專屬獨立座標)
+                            const seriesVol = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'vol', lastValueVisible: false, priceLineVisible: false }});
                             seriesVol.setData(rawData.map(d => ({{time: d.time, value: d.vol, color: d.vol >= 0 ? 'rgba(239, 83, 80, 0.8)' : 'rgba(38, 166, 154, 0.8)'}})));
+                            chart.priceScale('vol').applyOptions({{
+                                scaleMargins: {{ top: 0.58, bottom: 0.28 }},
+                                visible: false
+                            }});
                             
-                            // MACD 短線
-                            const seriesH1 = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'm1', scaleMargins: {{ top: 0.7, bottom: 0.15 }}, lastValueVisible: false, priceLineVisible: false }});
+                            // 3. MACD 短線區塊
+                            const seriesH1 = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'm1', lastValueVisible: false, priceLineVisible: false }});
                             seriesH1.setData(rawData.filter(d => d.h1 !== undefined).map(d => ({{time: d.time, value: d.h1, color: d.h1 >= 0 ? 'rgba(239, 83, 80, 0.5)' : 'rgba(38, 166, 154, 0.5)'}})));
                             const seriesM1 = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, priceScaleId: 'm1', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             seriesM1.setData(rawData.filter(d => d.m1 !== undefined).map(d => ({{time: d.time, value: d.m1}})));
                             const seriesS1 = chart.addLineSeries({{ color: '#00E676', lineWidth: 1, priceScaleId: 'm1', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             seriesS1.setData(rawData.filter(d => d.s1 !== undefined).map(d => ({{time: d.time, value: d.s1}})));
+                            chart.priceScale('m1').applyOptions({{
+                                scaleMargins: {{ top: 0.72, bottom: 0.15 }},
+                                visible: false
+                            }});
 
-                            // MACD 長線
-                            const seriesH2 = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'm2', scaleMargins: {{ top: 0.55, bottom: 0.3 }}, lastValueVisible: false, priceLineVisible: false }});
+                            // 4. MACD 長線區塊
+                            const seriesH2 = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'm2', lastValueVisible: false, priceLineVisible: false }});
                             seriesH2.setData(rawData.filter(d => d.h2 !== undefined).map(d => ({{time: d.time, value: d.h2, color: d.h2 >= 0 ? 'rgba(239, 83, 80, 0.5)' : 'rgba(38, 166, 154, 0.5)'}})));
                             const seriesM2 = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, priceScaleId: 'm2', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             seriesM2.setData(rawData.filter(d => d.m2 !== undefined).map(d => ({{time: d.time, value: d.m2}})));
                             const seriesS2 = chart.addLineSeries({{ color: '#00E676', lineWidth: 1, priceScaleId: 'm2', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             seriesS2.setData(rawData.filter(d => d.s2 !== undefined).map(d => ({{time: d.time, value: d.s2}})));
+                            chart.priceScale('m2').applyOptions({{
+                                scaleMargins: {{ top: 0.85, bottom: 0.0 }},
+                                visible: false
+                            }});
 
-                            chart.priceScale('m1').applyOptions({{ visible: false }});
-                            chart.priceScale('m2').applyOptions({{ visible: false }});
-
-                            // ✅ 完美修復：改用 createPriceLine 官方方法，保證畫得出來！
+                            // 🔑 畫線 100% 成功法：直接畫一條滿版橫線 (不會被座標系隱藏)
                             hlines.forEach(val => {{
-                                seriesK.createPriceLine({{
-                                    price: val,
-                                    color: '#2962FF',
-                                    lineWidth: 2,
-                                    lineStyle: 2, 
-                                    axisLabelVisible: true,
-                                    title: '📏',
-                                }});
+                                if(rawData.length > 0) {{
+                                    const hline = chart.addLineSeries({{ color: '#2962FF', lineWidth: 2, lineStyle: 2, crosshairMarkerVisible: false, priceLineVisible: true, lastValueVisible: true }});
+                                    hline.setData(rawData.map(d => ({{time: d.time, value: val}})));
+                                }}
                             }});
 
                             const legend = document.getElementById('legend');
