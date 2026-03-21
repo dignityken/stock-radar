@@ -594,7 +594,7 @@ with tab3:
     with c5: t3_u = st.radio("統計單位", ["張數", "金額"], horizontal=True, key="t3_unit")
 
     c6, c7, c8 = st.columns([1.5, 1, 1])
-    with c6: t3_mode = st.radio("篩選條件", ["嚴格模式 (只買不賣)", "濾網模式 (自訂佔比)"], index=1, horizontal=True, key="t3_mode")
+    with c6: t3_mode = st.radio("篩選條件", ["嚴格模式", "濾網模式"], index=1, horizontal=True, key="t3_mode")
     with c7: t3_p = st.number_input("佔比 >= (%)", 0.0, 100.0, 95.0, step=1.0, key="t3_pct")
     with c8: st.write(""); show_full_t3 = st.checkbox("顯示完整清單", value=False, key="t3_full")
 
