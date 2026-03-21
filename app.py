@@ -895,7 +895,7 @@ with tab4:
 
                     hlines_js_array = json.dumps(st.session_state.custom_hlines)
 
-                    html_code = f"""
+                   html_code = f"""
                     <!DOCTYPE html>
                     <html>
                     <head>
@@ -994,7 +994,7 @@ with tab4:
                             seriesS2.setData(rawData.filter(d => d.s2 !== undefined).map(d => ({{time: d.time, value: d.s2}})));
                             chart.priceScale('m2').applyOptions({{ scaleMargins: {{ top: 0.85, bottom: 0.0 }}, visible: false }});
 
-                            // 水平線
+                            // Streamlit 手動輸入的水平線
                             hlines.forEach(val => {{
                                 seriesK.createPriceLine({{
                                     price: val, color: '#2962FF', lineWidth: 2, lineStyle: 2, 
@@ -1034,6 +1034,65 @@ with tab4:
                                 if(d.h2 !== undefined) html += `<div class="lg-macd"><b>長 MACD:</b> 柱 <span style="color:${{d.h2>=0?'#ef5350':'#26a69a'}}">${{d.h2.toFixed(2)}}</span> | 快 <span style="color:#FFD600">${{d.m2.toFixed(2)}}</span> | 慢 <span style="color:#00E676">${{d.s2.toFixed(2)}}</span></div>`;
                                 
                                 legend.innerHTML = html;
+                            }});
+
+                            // ==========================================
+                            // 🆕 新增：點擊 K 棒自動畫出水平射線 (支撐/壓力線)
+                            // ==========================================
+                            chart.subscribeClick(param => {{
+                                // 確保有點擊到圖表有效範圍
+                                if(!param.time || param.point === undefined || param.point.y < 0) return;
+
+                                let timeStr = param.time;
+                                if (typeof timeStr === 'object' && timeStr.year) {{
+                                    timeStr = timeStr.year + '-' + String(timeStr.month).padStart(2, '0') + '-' + String(timeStr.day).padStart(2, '0');
+                                }}
+
+                                // 取出點擊那一天的 K 棒數據
+                                const d = dictByTime[timeStr] || dictByTime[param.time];
+                                if(!d) return;
+
+                                // 將滑鼠點擊的 Y 軸座標換算成價格
+                                const clickedPrice = seriesK.coordinateToPrice(param.point.y);
+                                if(clickedPrice === null) return;
+
+                                // 計算 K 棒一半的位置
+                                const midPrice = (d.high + d.low) / 2;
+                                
+                                let targetPrice, lineColor, lineTitle;
+                                // 判斷：點在 K 棒中線以上 -> 抓高點 (壓力)；點在以下 -> 抓低點 (支撐)
+                                if (clickedPrice >= midPrice) {{
+                                    targetPrice = d.high;
+                                    lineColor = '#ef5350'; // 紅色
+                                    lineTitle = '壓力 ' + targetPrice.toFixed(2);
+                                }} else {{
+                                    targetPrice = d.low;
+                                    lineColor = '#26a69a'; // 綠色
+                                    lineTitle = '支撐 ' + targetPrice.toFixed(2);
+                                }}
+
+                                // 創建一個向右延伸的射線 (利用 LineSeries 做出兩點成線)
+                                const raySeries = chart.addLineSeries({{
+                                    color: lineColor,
+                                    lineWidth: 2,
+                                    lineStyle: 2, // 虛線風格
+                                    lastValueVisible: true,
+                                    priceLineVisible: false,
+                                    crosshairMarkerVisible: false,
+                                    title: lineTitle
+                                }});
+
+                                const lastDataTime = rawData[rawData.length - 1].time;
+                                
+                                // 避開如果點擊的就是最新一天，兩個端點相同的問題
+                                if (d.time === lastDataTime) {{
+                                    raySeries.setData([ {{ time: d.time, value: targetPrice }} ]);
+                                }} else {{
+                                    raySeries.setData([
+                                        {{ time: d.time, value: targetPrice }},
+                                        {{ time: lastDataTime, value: targetPrice }}
+                                    ]);
+                                }}
                             }});
 
                             new ResizeObserver(() => {{
