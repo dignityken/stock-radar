@@ -831,22 +831,20 @@ def merge_kline_markers(markers):
 
 # --- Tab 4 (專業繪圖) ---
 with tab4:
-    # ── 限制控制區最大寬度，避免寬螢幕留白 ──
+    # ── CSS：限制控制區最大寬度，電腦版不拉伸，手機版全寬 ──
     st.markdown("""
     <style>
-    /* Tab4 控制區限制最大寬度 */
-    div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlockBorderWrapper"],
-    section.main > div.block-container { max-width: 100% !important; }
-    /* 限制 Tab4 內欄位不要無限拉寬 */
-    .t4-control-area .stTextInput, .t4-control-area .stSelectbox,
-    .t4-control-area .stNumberInput { max-width: 480px; }
+    /* 限制 Tab4 所有 columns 容器最大寬度 */
+    [data-testid="stHorizontalBlock"] { max-width: 700px !important; }
+    /* expander 也限制寬度 */
+    [data-testid="stExpander"] { max-width: 700px !important; }
     </style>
     """, unsafe_allow_html=True)
 
     if st.session_state.auto_draw:
         st.success("✅ 參數已帶入！請直接查看下方圖表。")
 
-    # ── 第一排：股票代號(小) + 搜尋分點(大) + 繪圖按鈕 ──
+    # ── 第一排：股票代號 + 搜尋分點 + 繪圖 ──
     c_sid, c_br, c_draw = st.columns([1, 3, 1])
     with c_sid:
         t4_sid = st.text_input("股票代號", value=st.session_state.get('t4_target_sid', '6488'))
@@ -859,21 +857,18 @@ with tab4:
         st.write("")
         draw_btn = st.button("🎨 繪圖", use_container_width=True)
 
-    # ── 第二排：K棒數 + 存入清單 ──
-    c_days, c_fav = st.columns([3, 1])
+    # ── 第二排：K棒數 + 存入清單 + 水平線 + 加入 + 清除（全部一排） ──
+    c_days, c_fav, c_hval, c_hadd, c_hclr = st.columns([2, 1, 2, 1, 1])
     with c_days:
         t4_days = st.number_input("K棒數", value=200, min_value=10, max_value=1000)
     with c_fav:
         st.write("")
-        fav_btn = st.button("❤️ 存入清單", use_container_width=True)
-
-    # ── 第三排：水平線價格 + 加入畫線 + 清除畫線 ──
-    c_hval, c_hadd, c_hclr = st.columns([2, 1, 1])
+        fav_btn = st.button("❤️ 存入", use_container_width=True)
     with c_hval:
         hline_val = st.number_input("📏 水平線價格", value=0.0, step=1.0, key="hline_val_input")
     with c_hadd:
         st.write("")
-        if st.button("➕ 加入畫線", use_container_width=True):
+        if st.button("➕ 畫線", use_container_width=True):
             if hline_val > 0 and hline_val not in st.session_state.custom_hlines:
                 st.session_state.custom_hlines.append(hline_val)
             st.session_state.t4_target_sid = t4_sid
@@ -883,7 +878,7 @@ with tab4:
             st.rerun()
     with c_hclr:
         st.write("")
-        if st.button("🗑️ 清除畫線", use_container_width=True):
+        if st.button("🗑️ 清除", use_container_width=True):
             st.session_state.custom_hlines = []
             st.session_state.click_lines = []
             st.session_state.t4_target_sid = t4_sid
@@ -971,7 +966,7 @@ with tab4:
         if 'enable_click_line' not in st.session_state:
             st.session_state.enable_click_line = False
         enable_click_line = st.checkbox(
-            "👆 啟用點擊 K 棒自動畫線",
+            "👆 啟用點擊 K 棒自動畫線 (防止手機滑動時誤觸)",
             key="enable_click_line"
         )
 
