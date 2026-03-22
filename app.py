@@ -741,6 +741,12 @@ def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
     in_red = False   # 目前是否在紅柱波段
     in_grn = False   # 目前是否在綠柱波段
 
+    # ─── 零軸穿越重置旗標 ────────────────────────────────────
+    # M 頂：兩波紅柱之間若 DIF 跌破 0，prev_top 作廢
+    # W 底：兩波綠柱之間若 DIF 升破 0，prev_bot 作廢
+    top_zero_broken = False   # 追蹤 M 頂期間，DIF 是否曾跌破 0
+    bot_zero_broken = False   # 追蹤 W 底期間，DIF 是否曾升破 0
+
     for i in range(1, len(df_res)):
         hist      = df_res[hist_col].iloc[i]
         hist_prev = df_res[hist_col].iloc[i - 1]
@@ -763,6 +769,21 @@ def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
             cur_top_close = 0.0
             cur_wave_high = 0.0
             in_red = True
+            # 若綠柱期間 DIF 曾升破 0（理論上綠柱期間 DIF 本就 <0，此旗標留給特殊情況）
+            # 重置 W 底的零軸旗標
+            bot_zero_broken = False
+
+        # M 頂零軸破壞偵測：在兩波紅柱之間的綠柱期間，若 DIF < 0 → prev_top 作廢
+        # （Pine: diff_main < 0 → prior_top = 0）
+        if not in_red and dif < 0 and prev_top_dif > 0:
+            top_zero_broken = True
+
+        if top_zero_broken and cross_up:
+            # DIF 曾跌破 0，前一波 M 頂基準作廢，重置
+            prev_top_dif   = 0.0
+            prev_top_date  = None
+            prev_top_close = 0.0
+            top_zero_broken = False
 
         if cross_down:
             # 紅柱波段結束
@@ -829,6 +850,20 @@ def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
             cur_bot_close = 0.0
             cur_wave_low  = 1e9
             in_grn = True
+            # 重置 M 頂的零軸旗標
+            top_zero_broken = False
+
+        # W 底零軸破壞偵測：在兩波綠柱之間的紅柱期間，若 DIF > 0 → prev_bot 作廢
+        # （Pine: diff_main > 0 → prior_bottom = 0）
+        if not in_grn and dif > 0 and prev_bot_dif < 0:
+            bot_zero_broken = True
+
+        if bot_zero_broken and cross_down:
+            # DIF 曾升破 0，前一波 W 底基準作廢，重置
+            prev_bot_dif   = 0.0
+            prev_bot_date  = None
+            prev_bot_close = 0.0
+            bot_zero_broken = False
 
         if cross_up:
             # 綠柱波段結束
