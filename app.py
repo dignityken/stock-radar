@@ -830,35 +830,46 @@ def merge_kline_markers(markers):
 
 # --- Tab 4 (專業繪圖) ---
 with tab4:
+    # ── 限制控制區最大寬度，避免寬螢幕留白 ──
+    st.markdown("""
+    <style>
+    /* Tab4 控制區限制最大寬度 */
+    div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlockBorderWrapper"],
+    section.main > div.block-container { max-width: 100% !important; }
+    /* 限制 Tab4 內欄位不要無限拉寬 */
+    .t4-control-area .stTextInput, .t4-control-area .stSelectbox,
+    .t4-control-area .stNumberInput { max-width: 480px; }
+    </style>
+    """, unsafe_allow_html=True)
+
     if st.session_state.auto_draw:
         st.success("✅ 參數已帶入！請直接查看下方圖表。")
 
-    # ── 第一排：股票代號 + 繪圖按鈕 ──
-    c_sid, c_draw = st.columns([3, 1])
+    # ── 第一排：股票代號(小) + 搜尋分點(大) + 繪圖按鈕 ──
+    c_sid, c_br, c_draw = st.columns([1, 3, 1])
     with c_sid:
         t4_sid = st.text_input("股票代號", value=st.session_state.get('t4_target_sid', '6488'))
+    with c_br:
+        all_br_names = sorted(list(BROKER_MAP.keys()))
+        t4_br_val = st.session_state.get('t4_target_br', '兆豐-忠孝')
+        idx = all_br_names.index(t4_br_val) if t4_br_val in all_br_names else 0
+        t4_br_name = st.selectbox("搜尋分點", all_br_names, index=idx)
     with c_draw:
         st.write("")
         draw_btn = st.button("🎨 繪圖", use_container_width=True)
 
-    # ── 第二排：搜尋分點（獨佔一行，手機友善） ──
-    all_br_names = sorted(list(BROKER_MAP.keys()))
-    t4_br_val = st.session_state.get('t4_target_br', '兆豐-忠孝')
-    idx = all_br_names.index(t4_br_val) if t4_br_val in all_br_names else 0
-    t4_br_name = st.selectbox("搜尋分點", all_br_names, index=idx)
-
-    # ── 第三排：週期 + K棒數 ──
-    c_period, c_days = st.columns([1, 1])
+    # ── 第二排：週期 + K棒數 + 存入清單 ──
+    c_period, c_days, c_fav = st.columns([2, 2, 1])
     with c_period:
         t4_period = st.radio("週期", ["日", "週", "月"], horizontal=True)
     with c_days:
         t4_days = st.number_input("K棒數", value=200, min_value=10, max_value=1000)
-
-    # ── 第四排：存入清單 + 水平線操作 ──
-    c_fav, c_hval, c_hadd, c_hclr = st.columns([1, 1, 1, 1])
     with c_fav:
         st.write("")
         fav_btn = st.button("❤️ 存入清單", use_container_width=True)
+
+    # ── 第三排：水平線價格 + 加入畫線 + 清除畫線 ──
+    c_hval, c_hadd, c_hclr = st.columns([2, 1, 1])
     with c_hval:
         hline_val = st.number_input("📏 水平線價格", value=0.0, step=1.0, key="hline_val_input")
     with c_hadd:
