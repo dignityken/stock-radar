@@ -749,7 +749,7 @@ def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
         if cross_down:
             in_red = False
             if prev_top_date is not None and prev_top_dif > 0:
-                markers_macd.append({"time": prev_top_date, "position": "aboveBar", "color": "#FFD600", "shape": "text", "text": f"{prev_top_dif:.2f}"})
+                markers_macd.append({"time": prev_top_date, "position": "aboveBar", "color": "#FFD600", "shape": "text", "text": f"{prev_top_dif:.2f}", "size": 1})
             if (cur_top_dif > 0 and prev_top_dif > 0 and cur_top_dif < prev_top_dif and cur_wave_high >= prev_top_close and prev_top_date is not None):
                 lbl = "价同" if cur_wave_high == prev_top_close else "价破"
                 markers_price.append({"time": prev_top_date, "position": "aboveBar", "color": "#ef5350", "shape": "arrowDown", "text": f"M{prefix}\n{lbl}\n{prev_top_close:.2f}", "price": prev_top_close})
@@ -778,7 +778,7 @@ def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
         if cross_up:
             in_grn = False
             if prev_bot_date is not None and prev_bot_dif < 0:
-                markers_macd.append({"time": prev_bot_date, "position": "belowBar", "color": "#00E676", "shape": "text", "text": f"{prev_bot_dif:.2f}"})
+                markers_macd.append({"time": prev_bot_date, "position": "belowBar", "color": "#00E676", "shape": "text", "text": f"{prev_bot_dif:.2f}", "size": 1})
             if (cur_bot_dif < 0 and prev_bot_dif < 0 and cur_bot_dif > prev_bot_dif and cur_wave_low <= prev_bot_close and prev_bot_date is not None):
                 lbl = "价同" if cur_wave_low == prev_bot_close else "价破"
                 markers_price.append({"time": prev_bot_date, "position": "belowBar", "color": "#26a69a", "shape": "arrowUp", "text": f"W{prefix}\n{lbl}\n{prev_bot_close:.2f}", "price": prev_bot_close})
@@ -795,13 +795,13 @@ def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
         if i == len(df_res) - 1:
             if hist > 0 and cur_top_dif > 0 and prev_top_dif > 0:
                 if prev_top_date is not None:
-                    markers_macd.append({"time": prev_top_date, "position": "aboveBar", "color": "#FFD600", "shape": "text", "text": f"{prev_top_dif:.2f}"})
+                    markers_macd.append({"time": prev_top_date, "position": "aboveBar", "color": "#FFD600", "shape": "text", "text": f"{prev_top_dif:.2f}", "size": 1})
                 if cur_top_dif < prev_top_dif and cur_wave_high >= prev_top_close and prev_top_date is not None:
                     lbl = "价同" if cur_wave_high == prev_top_close else "价破"
                     markers_price.append({"time": prev_top_date, "position": "aboveBar", "color": "#ef5350", "shape": "arrowDown", "text": f"未M{prefix}\n{lbl}\n{prev_top_close:.2f}", "price": prev_top_close})
             if hist < 0 and cur_bot_dif < 0 and prev_bot_dif < 0:
                 if prev_bot_date is not None:
-                    markers_macd.append({"time": prev_bot_date, "position": "belowBar", "color": "#00E676", "shape": "text", "text": f"{prev_bot_dif:.2f}"})
+                    markers_macd.append({"time": prev_bot_date, "position": "belowBar", "color": "#00E676", "shape": "text", "text": f"{prev_bot_dif:.2f}", "size": 1})
                 if cur_bot_dif > prev_bot_dif and cur_wave_low <= prev_bot_close and prev_bot_date is not None:
                     lbl = "价同" if cur_wave_low == prev_bot_close else "价破"
                     markers_price.append({"time": prev_bot_date, "position": "belowBar", "color": "#26a69a", "shape": "arrowUp", "text": f"未W{prefix}\n{lbl}\n{prev_bot_close:.2f}", "price": prev_bot_close})
@@ -834,10 +834,8 @@ with tab4:
     # ── CSS：限制控制區最大寬度，電腦版不拉伸，手機版全寬 ──
     st.markdown("""
     <style>
-    /* 限制 Tab4 所有 columns 容器最大寬度 */
-    [data-testid="stHorizontalBlock"] { max-width: 700px !important; }
-    /* expander 也限制寬度 */
-    [data-testid="stExpander"] { max-width: 700px !important; }
+    /* 只限制 Tab4 控制區的 columns，不影響圖表 iframe */
+    [data-testid="stHorizontalBlock"]:has(input, select, button) { max-width: 700px !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -966,7 +964,7 @@ with tab4:
         if 'enable_click_line' not in st.session_state:
             st.session_state.enable_click_line = False
         enable_click_line = st.checkbox(
-            "👆 啟用點擊 K 棒自動畫線",
+            "👆 啟用點擊 K 棒自動畫線 (防止手機滑動時誤觸)",
             key="enable_click_line"
         )
 
