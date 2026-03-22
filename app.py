@@ -966,7 +966,7 @@ with tab4:
         if 'enable_click_line' not in st.session_state:
             st.session_state.enable_click_line = False
         enable_click_line = st.checkbox(
-            "👆 啟用點擊 K 棒自動畫線 (防止手機滑動時誤觸)",
+            "👆 啟用點擊 K 棒自動畫線",
             key="enable_click_line"
         )
 
