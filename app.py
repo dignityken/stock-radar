@@ -140,7 +140,6 @@ def init_gsheets():
 def load_gsheet_watchlist(username):
     ws, msg = init_gsheets()
     if not ws: 
-        print(f"GSheets 載入失敗: {msg}")
         return []
     try:
         cell = ws.find(username, in_column=1)
@@ -149,7 +148,7 @@ def load_gsheet_watchlist(username):
             if data:
                 return json.loads(data)
     except Exception as e:
-        print(f"GSheets 讀取錯誤: {e}")
+        pass
     return []
 
 def save_gsheet_watchlist(username, wl_list):
@@ -546,7 +545,7 @@ with tab2:
                 df_show = df_show[['送至 Tab4 繪圖', '券商', '買', '賣', '合計', '買進%', '賣出%', '網頁明細']]
                 col_config = {
                     "網頁明細": st.column_config.LinkColumn("網頁明細", display_text="🏦", help="外連富邦明細"),
-                    "送至 Tab4 繪圖": st.column_config.CheckboxColumn("送至 Tab4 繪圖", help="打勾後請手手動切換至分頁四")
+                    "送至 Tab4 繪圖": st.column_config.CheckboxColumn("送至 Tab4 繪圖", help="打勾後請手動切換至分頁四")
                 }
                 
                 editor_key = f"editor_{key_prefix}_{st.session_state.table_refresh_key}"
@@ -696,97 +695,144 @@ with tab3:
         display_table_with_button_t3(st.session_state.t3_sell_df.sort_values(by=col_sell, ascending=False).head(999 if show_full_t3 else 10), "t3_sell")
 
 # ==========================================
-# 🌟 [新增函數] 透過短線 MACD 計算主圖與副圖背離標記
+# 🌟 [新增函數] 復刻 Pine Script 的 MACD 波段極值背離邏輯
 # ==========================================
-def get_divergence_markers(df_res):
-    """依照 Pine Script 邏輯，偵測 M頂背離 與 W底背離，並抓取 MACD 極值"""
+def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
+    """
+    精確還原 TradingView M/W 門演算法：
+    只在 MACD(Hist) 穿過零軸，波段結束時，比較前一波段與當前波段的「DIF極值」與「價格極值」。
+    """
     markers_price = []
     markers_macd = []
-    
-    prev_pos_m = -float('inf')
-    prev_pos_p = -float('inf')
-    curr_pos_m = -float('inf')
-    curr_pos_p = -float('inf')
-    curr_pos_date = None
-    
-    prev_neg_m = float('inf')
-    prev_neg_p = float('inf')
-    curr_neg_m = float('inf')
-    curr_neg_p = float('inf')
-    curr_neg_date = None
-    
-    state = "zero"
-    
-    for i in range(2, len(df_res)):
-        macd = df_res['M1_macd'].iloc[i]
-        hist = df_res['M1_hist'].iloc[i]
+
+    # 前一波段極值紀錄
+    prev_pos_dif = -float('inf')
+    prev_pos_price = -float('inf')
+    prev_neg_dif = float('inf')
+    prev_neg_price = float('inf')
+
+    # 當前波段狀態與極值
+    in_pos = False
+    in_neg = False
+
+    cur_pos_dif = -float('inf')
+    cur_pos_price = -float('inf')
+    cur_pos_price_date = None
+    cur_pos_dif_date = None
+
+    cur_neg_dif = float('inf')
+    cur_neg_price = float('inf')
+    cur_neg_price_date = None
+    cur_neg_dif_date = None
+
+    for i in range(1, len(df_res)):
+        hist = df_res[hist_col].iloc[i]
+        macd = df_res[macd_col].iloc[i]
         high = df_res['High'].iloc[i]
         low = df_res['Low'].iloc[i]
         date = df_res['Date_str'].iloc[i]
-        
-        # 處理 MACD 大於 0 的正波段 (找 M 頭)
-        if macd > 0:
-            if state != "pos":
-                # 當 MACD 從負轉正，記錄上一波正波的極值
-                if curr_pos_m != -float('inf'):
-                    prev_pos_m = curr_pos_m
-                    prev_pos_p = curr_pos_p
-                    # 標記 MACD 波峰
-                    markers_macd.append({"time": curr_pos_date, "position": "aboveBar", "color": "#FFD600", "shape": "circle", "text": f"{curr_pos_m:.2f}"})
-                
-                curr_pos_m = macd
-                curr_pos_p = high
-                curr_pos_date = date
-                state = "pos"
-            else:
-                if macd > curr_pos_m:
-                    curr_pos_m = macd
-                    curr_pos_p = high
-                    curr_pos_date = date
-            
-            # 背離確認條件：動能反轉(柱狀圖縮減)，MACD創低，但價格創高(或持平)
-            if hist < df_res['M1_hist'].iloc[i-1] and df_res['M1_hist'].iloc[i-1] >= df_res['M1_hist'].iloc[i-2]:
-                if prev_pos_m != -float('inf'):
-                    if curr_pos_m < prev_pos_m and curr_pos_p >= prev_pos_p:
-                        # 標記 K 線 M頂背離 (防止同一天重複標註)
-                        if not any(m['time'] == curr_pos_date and 'M' in m['text'] for m in markers_price):
-                            markers_price.append({"time": curr_pos_date, "position": "aboveBar", "color": "#ef5350", "shape": "arrowDown", "text": "M頂背離"})
-        
-        # 處理 MACD 小於 0 的負波段 (找 W 底)
-        elif macd < 0:
-            if state != "neg":
-                # 當 MACD 從正轉負，記錄上一波負波的極值
-                if curr_neg_m != float('inf'):
-                    prev_neg_m = curr_neg_m
-                    prev_neg_p = curr_neg_p
-                    # 標記 MACD 波谷
-                    markers_macd.append({"time": curr_neg_date, "position": "belowBar", "color": "#00E676", "shape": "circle", "text": f"{curr_neg_m:.2f}"})
-                
-                curr_neg_m = macd
-                curr_neg_p = low
-                curr_neg_date = date
-                state = "neg"
-            else:
-                if macd < curr_neg_m:
-                    curr_neg_m = macd
-                    curr_neg_p = low
-                    curr_neg_date = date
-            
-            # 背離確認條件：動能反轉(柱狀圖縮減)，MACD創高，但價格創低(或持平)
-            if hist > df_res['M1_hist'].iloc[i-1] and df_res['M1_hist'].iloc[i-1] <= df_res['M1_hist'].iloc[i-2]:
-                if prev_neg_m != float('inf'):
-                    if curr_neg_m > prev_neg_m and curr_neg_p <= prev_neg_p:
-                        # 標記 K 線 W底背離
-                        if not any(m['time'] == curr_neg_date and 'W' in m['text'] for m in markers_price):
-                            markers_price.append({"time": curr_neg_date, "position": "belowBar", "color": "#26a69a", "shape": "arrowUp", "text": "W底背離"})
 
-    # 處理最後一波尚未結束的極值
-    if state == "pos" and curr_pos_m != -float('inf'):
-        markers_macd.append({"time": curr_pos_date, "position": "aboveBar", "color": "#FFD600", "shape": "circle", "text": f"{curr_pos_m:.2f}"})
-    elif state == "neg" and curr_neg_m != float('inf'):
-        markers_macd.append({"time": curr_neg_date, "position": "belowBar", "color": "#00E676", "shape": "circle", "text": f"{curr_neg_m:.2f}"})
-        
+        hist_prev = df_res[hist_col].iloc[i-1]
+
+        # 🟡 Histogram 向上穿越零軸 (負波段結束，正波段開始)
+        if hist_prev <= 0 and hist > 0:
+            if in_neg:
+                # 1. 標記副圖的波段最低 DIF 值
+                markers_macd.append({
+                    "time": cur_neg_dif_date,
+                    "position": "belowBar",
+                    "color": "#00E676", # 綠色字
+                    "shape": "text",
+                    "text": f"{cur_neg_dif:.2f}"
+                })
+                # 2. 判斷 W門 底背離：當前波谷 > 前波谷 (DIF收斂) 且 當前低價 <= 前波低價 (價格破底或打平)
+                if cur_neg_dif > prev_neg_dif and cur_neg_price <= prev_neg_price and prev_neg_dif != float('inf'):
+                    lbl_type = "价同" if cur_neg_price == prev_neg_price else "价破"
+                    markers_price.append({
+                        "time": cur_neg_price_date,
+                        "position": "belowBar",
+                        "color": "#26a69a",
+                        "shape": "arrowUp",
+                        "text": f"W{prefix}\n{lbl_type}\n{cur_neg_price:.2f}"
+                    })
+                # 3. 儲存當前極值，供下一波比較
+                prev_neg_dif = cur_neg_dif
+                prev_neg_price = cur_neg_price
+
+            # 重置正波段紀錄
+            in_pos = True
+            in_neg = False
+            cur_pos_dif = macd
+            cur_pos_price = high
+            cur_pos_price_date = date
+            cur_pos_dif_date = date
+
+        # 🔴 Histogram 向下穿越零軸 (正波段結束，負波段開始)
+        elif hist_prev >= 0 and hist < 0:
+            if in_pos:
+                # 1. 標記副圖的波段最高 DIF 值
+                markers_macd.append({
+                    "time": cur_pos_dif_date,
+                    "position": "aboveBar",
+                    "color": "#FFD600", # 黃色字
+                    "shape": "text",
+                    "text": f"{cur_pos_dif:.2f}"
+                })
+                # 2. 判斷 M門 頂背離：當前波峰 < 前波峰 (DIF收斂) 且 當前高價 >= 前波高價 (價格創高或打平)
+                if cur_pos_dif < prev_pos_dif and cur_pos_price >= prev_pos_price and prev_pos_dif != -float('inf'):
+                    lbl_type = "价同" if cur_pos_price == prev_pos_price else "价破"
+                    markers_price.append({
+                        "time": cur_pos_price_date,
+                        "position": "aboveBar",
+                        "color": "#ef5350",
+                        "shape": "arrowDown",
+                        "text": f"M{prefix}\n{lbl_type}\n{cur_pos_price:.2f}"
+                    })
+                # 3. 儲存當前極值，供下一波比較
+                prev_pos_dif = cur_pos_dif
+                prev_pos_price = cur_pos_price
+
+            # 重置負波段紀錄
+            in_neg = True
+            in_pos = False
+            cur_neg_dif = macd
+            cur_neg_price = low
+            cur_neg_price_date = date
+            cur_neg_dif_date = date
+
+        # 持續正波段：更新最高點
+        elif hist > 0 and in_pos:
+            if macd > cur_pos_dif:
+                cur_pos_dif = macd
+                cur_pos_dif_date = date
+            if high > cur_pos_price:
+                cur_pos_price = high
+                cur_pos_price_date = date
+
+        # 持續負波段：更新最低點
+        elif hist < 0 and in_neg:
+            if macd < cur_neg_dif:
+                cur_neg_dif = macd
+                cur_neg_dif_date = date
+            if low < cur_neg_price:
+                cur_neg_price = low
+                cur_neg_price_date = date
+
+    # 處理圖表最末端尚未結束的半截波段，確保最近的極值也有標出來
+    if in_pos and cur_pos_dif_date:
+        markers_macd.append({"time": cur_pos_dif_date, "position": "aboveBar", "color": "#FFD600", "shape": "text", "text": f"{cur_pos_dif:.2f}"})
+        if cur_pos_dif < prev_pos_dif and cur_pos_price >= prev_pos_price and prev_pos_dif != -float('inf'):
+            lbl_type = "价同" if cur_pos_price == prev_pos_price else "价破"
+            markers_price.append({"time": cur_pos_price_date, "position": "aboveBar", "color": "#ef5350", "shape": "arrowDown", "text": f"M{prefix}\n{lbl_type}\n{cur_pos_price:.2f}"})
+            
+    elif in_neg and cur_neg_dif_date:
+        markers_macd.append({"time": cur_neg_dif_date, "position": "belowBar", "color": "#00E676", "shape": "text", "text": f"{cur_neg_dif:.2f}"})
+        if cur_neg_dif > prev_neg_dif and cur_neg_price <= prev_neg_price and prev_neg_dif != float('inf'):
+            lbl_type = "价同" if cur_neg_price == prev_neg_price else "价破"
+            markers_price.append({"time": cur_neg_price_date, "position": "belowBar", "color": "#26a69a", "shape": "arrowUp", "text": f"W{prefix}\n{lbl_type}\n{cur_neg_price:.2f}"})
+
     return markers_price, markers_macd
+
 
 # --- Tab 4 (專業繪圖) ---
 with tab4:
@@ -973,7 +1019,7 @@ with tab4:
                     macd1, sig1, hist1 = calculate_macd(df_resampled, int(macd1_f), int(macd1_s), int(macd1_sig))
                     macd2, sig2, hist2 = calculate_macd(df_resampled, int(macd2_f), int(macd2_s), int(macd2_sig))
                     
-                    # 🌟 將 MACD 資料先塞回大表，以便傳入運算函式
+                    # 🌟 將 MACD 資料先塞回大表，以便傳入波段極值運算函式
                     df_resampled['M1_hist'] = hist1
                     df_resampled['M1_macd'] = macd1
                     df_resampled['M1_sig'] = sig1
@@ -982,16 +1028,20 @@ with tab4:
                     df_resampled['M2_macd'] = macd2
                     df_resampled['M2_sig'] = sig2
                     
-                    # 🌟 計算所有的背離標記點與 MACD 極值點
-                    all_markers_price, all_markers_macd = get_divergence_markers(df_resampled)
+                    # 🌟 計算所有的背離標記點與 MACD 極值點 (短線加後綴S，長線加後綴L)
+                    markers_price_m1, markers_macd_m1 = get_pine_divergence_markers(df_resampled, 'M1_macd', 'M1_hist', 'S')
+                    markers_price_m2, markers_macd_m2 = get_pine_divergence_markers(df_resampled, 'M2_macd', 'M2_hist', 'L')
+                    
+                    all_markers_price = markers_price_m1 + markers_price_m2
                     
                     # 裁切畫面上要顯示的天數
                     df_plot = df_resampled.tail(int(drawn_days)).copy()
                     plot_valid_dates = set(df_plot['Date_str'].tolist())
                     
-                    # 🌟 過濾掉不在顯示範圍內的標籤，避免 JS 報錯
-                    markers_price = [m for m in all_markers_price if m['time'] in plot_valid_dates]
-                    markers_macd = [m for m in all_markers_macd if m['time'] in plot_valid_dates]
+                    # 🌟 過濾掉不在顯示範圍內的標籤，並強制依時間排序(防 JS 報錯)
+                    final_markers_price = sorted([m for m in all_markers_price if m['time'] in plot_valid_dates], key=lambda x: x['time'])
+                    final_markers_macd_m1 = sorted([m for m in markers_macd_m1 if m['time'] in plot_valid_dates], key=lambda x: x['time'])
+                    final_markers_macd_m2 = sorted([m for m in markers_macd_m2 if m['time'] in plot_valid_dates], key=lambda x: x['time'])
 
                     all_data = []
                     for i, row in df_plot.iterrows():
@@ -1056,14 +1106,17 @@ with tab4:
                         <div id="wrapper">
                             <div id="chart"></div>
                             <div id="legend" class="tv-legend">將滑鼠(或手指)移至 K 線上查看數據</div>
-                            <!-- 懸浮畫線按鈕 -->
                             <button id="mobileDrawBtn">✏️ 畫線於此</button>
                         </div>
                         <script>
                             const rawData = {json.dumps(all_data)};
                             const hlines = {hlines_js_array};
-                            const markersPrice = {json.dumps(markers_price)};
-                            const markersMacd = {json.dumps(markers_macd)};
+                            
+                            // 🌟 接收長短線專屬標記陣列
+                            const markersPrice = {json.dumps(final_markers_price)};
+                            const markersMacd1 = {json.dumps(final_markers_macd_m1)};
+                            const markersMacd2 = {json.dumps(final_markers_macd_m2)};
+                            
                             const enableClickLine = {'true' if enable_click_line else 'false'};
                             
                             const layoutOptions = {{ 
@@ -1100,7 +1153,7 @@ with tab4:
                             const seriesK = chart.addCandlestickSeries({{ upColor: '#ef5350', downColor: '#26a69a', borderVisible: false, wickUpColor: '#ef5350', wickDownColor: '#26a69a' }});
                             seriesK.setData(rawData.map(d => ({{time: d.time, open: d.open, high: d.high, low: d.low, close: d.close}})));
                             
-                            // 🌟 套用 M頭 / W底 背離標記到主圖 K 線上
+                            // 🌟 套用 M門 / W門 (價破/價同) 標記到主圖 K 線上
                             seriesK.setMarkers(markersPrice);
                             
                             // BB
@@ -1122,8 +1175,8 @@ with tab4:
                             const seriesM1 = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, priceScaleId: 'm1', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             seriesM1.setData(rawData.filter(d => d.m1 !== undefined).map(d => ({{time: d.time, value: d.m1}})));
                             
-                            // 🌟 套用 MACD 極值標籤到副圖 M1 (DIF線) 上
-                            seriesM1.setMarkers(markersMacd);
+                            // 🌟 套用短線 MACD 極值標籤
+                            seriesM1.setMarkers(markersMacd1);
                             
                             const seriesS1 = chart.addLineSeries({{ color: '#00E676', lineWidth: 1, priceScaleId: 'm1', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             seriesS1.setData(rawData.filter(d => d.s1 !== undefined).map(d => ({{time: d.time, value: d.s1}})));
@@ -1134,6 +1187,10 @@ with tab4:
                             seriesH2.setData(rawData.filter(d => d.h2 !== undefined).map(d => ({{time: d.time, value: d.h2, color: d.h2 >= 0 ? 'rgba(239, 83, 80, 0.5)' : 'rgba(38, 166, 154, 0.5)'}})));
                             const seriesM2 = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, priceScaleId: 'm2', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             seriesM2.setData(rawData.filter(d => d.m2 !== undefined).map(d => ({{time: d.time, value: d.m2}})));
+                            
+                            // 🌟 套用長線 MACD 極值標籤
+                            seriesM2.setMarkers(markersMacd2);
+                            
                             const seriesS2 = chart.addLineSeries({{ color: '#00E676', lineWidth: 1, priceScaleId: 'm2', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             seriesS2.setData(rawData.filter(d => d.s2 !== undefined).map(d => ({{time: d.time, value: d.s2}})));
                             chart.priceScale('m2').applyOptions({{ scaleMargins: {{ top: 0.85, bottom: 0.0 }}, visible: false }});
@@ -1151,10 +1208,7 @@ with tab4:
                             const getDayOfWeek = (dStr) => ['週日', '週一', '週二', '週三', '週四', '週五', '週六'][new Date(dStr).getDay()];
                             const dictByTime = {{}}; rawData.forEach(d => dictByTime[d.time] = d);
                             
-                            // 如果有打勾「啟用點擊自動畫線」，就顯示那顆紅色畫線按鈕
-                            if(enableClickLine) {{
-                                mobileDrawBtn.style.display = 'block';
-                            }}
+                            if(enableClickLine) {{ mobileDrawBtn.style.display = 'block'; }}
 
                             let lastCrosshairParam = null;
 
@@ -1163,7 +1217,6 @@ with tab4:
                                     legend.innerHTML = '將滑鼠(或手指)移至 K 線上查看數據'; return;
                                 }}
                                 
-                                // 隨時記錄十字線的位置，給畫線按鈕使用
                                 lastCrosshairParam = param;
                                 
                                 let timeStr = param.time;
@@ -1191,9 +1244,6 @@ with tab4:
                                 legend.innerHTML = html;
                             }});
 
-                            // ==========================================
-                            // 手機友好版：點擊按鈕，在目前十字線位置畫線
-                            // ==========================================
                             mobileDrawBtn.addEventListener('click', () => {{
                                 if(!lastCrosshairParam || !lastCrosshairParam.time || lastCrosshairParam.point === undefined || lastCrosshairParam.point.y < 0) {{
                                     alert('請先觸碰圖表，將十字線移動到指定的 K 棒上！');
@@ -1208,14 +1258,12 @@ with tab4:
                                 const d = dictByTime[timeStr] || dictByTime[lastCrosshairParam.time];
                                 if(!d) return;
 
-                                // 抓取游標(或手指)的最後 Y 座標換算價格
                                 const clickedPrice = seriesK.coordinateToPrice(lastCrosshairParam.point.y);
                                 if(clickedPrice === null) return;
 
                                 const midPrice = (d.high + d.low) / 2;
                                 
                                 let targetPrice, lineColor, lineTitle;
-                                // 手指在 K 棒中線之上畫紅線(壓力)，在下畫綠線(支撐)
                                 if (clickedPrice >= midPrice) {{
                                     targetPrice = d.high;
                                     lineColor = '#ef5350'; 
@@ -1247,11 +1295,9 @@ with tab4:
                                 }}
                             }});
 
-                            // 保留電腦版雙擊或點擊功能 (相容滑鼠)
                             chart.subscribeClick(param => {{
-                                // 電腦版點擊圖表也可觸發畫線(需打勾)
                                 if(!enableClickLine) return;
-                                if(param.point && param.point.x < window.innerWidth - 100) {{ // 避免按到按鈕時誤判
+                                if(param.point && param.point.x < window.innerWidth - 100) {{
                                      mobileDrawBtn.click();
                                 }}
                             }});
