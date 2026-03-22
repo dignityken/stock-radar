@@ -695,57 +695,32 @@ with tab3:
         display_table_with_button_t3(st.session_state.t3_sell_df.sort_values(by=col_sell, ascending=False).head(999 if show_full_t3 else 10), "t3_sell")
 
 # ==========================================
-# 🌟 [終極精確版] 完全還原 Pine Script 波段極值背離邏輯
+# 🌟 背離標記函數
 # ==========================================
 def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
-    """
-    完全照 Pine Script 還原：
-
-    【副圖數值標籤】
-    - Pine: label.new(x=prevMinBar_sub, y=prevMinDif_sub, ...)  ← 在「前一波 DIF 極值 bar」
-    - 時機：波段結束（cross）時，把「前一波」的 DIF 極值標在「前一波極值那天」
-    - 所以副圖標籤 = prior 的日期 + prior 的 DIF 數值
-
-    【主圖箭頭標籤】
-    - Pine: label.new(bar_index - safe_counter_SumTop, prior_top_close, ...)
-    - counter_SumTop = counter_1（當前波長度）+ counter_main（前一波長度）+ counter_2（中間段）
-    - 換算後就是「前一波 DIF 極值那天」
-    - 所以主圖標籤 = prior 的日期 + prior 那天的股價
-    """
-
     markers_price = []
     markers_macd  = []
 
-    # ─── M 頂狀態 ────────────────────────────────────────────
-    cur_top_dif   = 0.0    # 當前紅柱波段的 DIF 最高值
-    cur_top_date  = None   # 當前紅柱波段 DIF 最高值那天日期
-    cur_top_close = 0.0    # 當前紅柱波段 DIF 最高值那天股價高點
+    cur_top_dif   = 0.0
+    cur_top_date  = None
+    cur_top_close = 0.0
+    prev_top_dif   = 0.0
+    prev_top_date  = None
+    prev_top_close = 0.0
+    cur_wave_high = 0.0
 
-    prev_top_dif   = 0.0   # 前一波紅柱波段的 DIF 最高值（Pine: prevMaxDif）
-    prev_top_date  = None  # 前一波紅柱波段 DIF 最高值那天日期（Pine: prevMaxBar）
-    prev_top_close = 0.0   # 前一波紅柱波段 DIF 最高值那天股價高點（Pine: prior_top_close_main）
-
-    cur_wave_high = 0.0    # 當前紅柱波段「絕對股價最高點」（Pine: second_top_close）
-
-    # ─── W 底狀態 ────────────────────────────────────────────
     cur_bot_dif   = 0.0
     cur_bot_date  = None
     cur_bot_close = 0.0
-
     prev_bot_dif   = 0.0
     prev_bot_date  = None
     prev_bot_close = 0.0
+    cur_wave_low = 1e9
 
-    cur_wave_low = 1e9     # 當前綠柱波段「絕對股價最低點」
-
-    in_red = False   # 目前是否在紅柱波段
-    in_grn = False   # 目前是否在綠柱波段
-
-    # ─── 零軸穿越重置旗標 ────────────────────────────────────
-    # M 頂：兩波紅柱之間若 DIF 跌破 0，prev_top 作廢
-    # W 底：兩波綠柱之間若 DIF 升破 0，prev_bot 作廢
-    top_zero_broken = False   # 追蹤 M 頂期間，DIF 是否曾跌破 0
-    bot_zero_broken = False   # 追蹤 W 底期間，DIF 是否曾升破 0
+    in_red = False
+    in_grn = False
+    top_zero_broken = False
+    bot_zero_broken = False
 
     for i in range(1, len(df_res)):
         hist      = df_res[hist_col].iloc[i]
@@ -755,226 +730,87 @@ def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
         low       = df_res['Low'].iloc[i]
         date      = df_res['Date_str'].iloc[i]
 
-        cross_up   = (hist_prev <= 0 and hist > 0)   # 綠→紅
-        cross_down = (hist_prev >= 0 and hist < 0)   # 紅→綠
-
-        # ══════════════════════════════════════════════
-        # M 頂邏輯
-        # ══════════════════════════════════════════════
+        cross_up   = (hist_prev <= 0 and hist > 0)
+        cross_down = (hist_prev >= 0 and hist < 0)
 
         if cross_up:
-            # 紅柱波段開始：重置當前波追蹤
-            cur_top_dif   = 0.0
-            cur_top_date  = None
-            cur_top_close = 0.0
-            cur_wave_high = 0.0
+            cur_top_dif = 0.0; cur_top_date = None; cur_top_close = 0.0; cur_wave_high = 0.0
             in_red = True
-            # 若綠柱期間 DIF 曾升破 0（理論上綠柱期間 DIF 本就 <0，此旗標留給特殊情況）
-            # 重置 W 底的零軸旗標
             bot_zero_broken = False
 
-        # M 頂零軸破壞偵測：在兩波紅柱之間的綠柱期間，若 DIF < 0 → prev_top 作廢
-        # （Pine: diff_main < 0 → prior_top = 0）
         if not in_red and dif < 0 and prev_top_dif > 0:
             top_zero_broken = True
 
         if top_zero_broken and cross_up:
-            # DIF 曾跌破 0，前一波 M 頂基準作廢，重置
-            prev_top_dif   = 0.0
-            prev_top_date  = None
-            prev_top_close = 0.0
+            prev_top_dif = 0.0; prev_top_date = None; prev_top_close = 0.0
             top_zero_broken = False
 
         if cross_down:
-            # 紅柱波段結束
             in_red = False
-
-            # ── 副圖：在「前一波 DIF 高點那天（prev_top_date）」標數值 ──
-            # Pine: label.new(x=prevMaxBar_sub, y=prevMaxDif_sub, text=str(prevMaxDif))
             if prev_top_date is not None and prev_top_dif > 0:
-                markers_macd.append({
-                    "time":     prev_top_date,      # ← 前一波 DIF 高點那天
-                    "position": "aboveBar",
-                    "color":    "#FFD600",
-                    "shape":    "text",
-                    "text":     f"{prev_top_dif:.2f}"
-                })
-
-            # ── 主圖：背離判斷 ──
-            # 條件：cur_top_dif < prev_top_dif（DIF 收斂）
-            #       cur_wave_high >= prev_top_close（股價破/同前一波 DIF 高點那天的股價）
-            if (cur_top_dif > 0 and prev_top_dif > 0
-                    and cur_top_dif < prev_top_dif
-                    and cur_wave_high >= prev_top_close
-                    and prev_top_date is not None):
+                markers_macd.append({"time": prev_top_date, "position": "aboveBar", "color": "#FFD600", "shape": "text", "text": f"{prev_top_dif:.2f}"})
+            if (cur_top_dif > 0 and prev_top_dif > 0 and cur_top_dif < prev_top_dif and cur_wave_high >= prev_top_close and prev_top_date is not None):
                 lbl = "价同" if cur_wave_high == prev_top_close else "价破"
-                # Pine: label.new(bar_index - counter_SumTop, prior_top_close, ...)
-                #       → 標在「前一波 DIF 高點那天」，Y 軸用前一波那天的股價
-                markers_price.append({
-                    "time":     prev_top_date,      # ← 前一波 DIF 高點那天
-                    "position": "aboveBar",
-                    "color":    "#ef5350",
-                    "shape":    "arrowDown",
-                    "text":     f"M{prefix}\n{lbl}\n{prev_top_close:.2f}"
-                })
-
-            # 本波結束，本波變成「前一波」
+                markers_price.append({"time": prev_top_date, "position": "aboveBar", "color": "#ef5350", "shape": "arrowDown", "text": f"M{prefix}\n{lbl}\n{prev_top_close:.2f}"})
             if cur_top_dif > 0:
-                prev_top_dif   = cur_top_dif
-                prev_top_date  = cur_top_date
-                prev_top_close = cur_top_close
+                prev_top_dif = cur_top_dif; prev_top_date = cur_top_date; prev_top_close = cur_top_close
+            cur_top_dif = 0.0; cur_top_date = None; cur_top_close = 0.0; cur_wave_high = 0.0
 
-            # 重置當前波
-            cur_top_dif   = 0.0
-            cur_top_date  = None
-            cur_top_close = 0.0
-            cur_wave_high = 0.0
-
-        # 在紅柱波段中：追蹤 DIF 高點 & 股價高點
         if hist > 0:
             if dif > cur_top_dif:
-                cur_top_dif   = dif
-                cur_top_date  = date
-                cur_top_close = high
+                cur_top_dif = dif; cur_top_date = date; cur_top_close = high
             if high > cur_wave_high:
                 cur_wave_high = high
 
-        # ══════════════════════════════════════════════
-        # W 底邏輯
-        # ══════════════════════════════════════════════
-
         if cross_down:
-            # 綠柱波段開始：重置當前波追蹤
-            cur_bot_dif   = 0.0
-            cur_bot_date  = None
-            cur_bot_close = 0.0
-            cur_wave_low  = 1e9
+            cur_bot_dif = 0.0; cur_bot_date = None; cur_bot_close = 0.0; cur_wave_low = 1e9
             in_grn = True
-            # 重置 M 頂的零軸旗標
             top_zero_broken = False
 
-        # W 底零軸破壞偵測：在兩波綠柱之間的紅柱期間，若 DIF > 0 → prev_bot 作廢
-        # （Pine: diff_main > 0 → prior_bottom = 0）
         if not in_grn and dif > 0 and prev_bot_dif < 0:
             bot_zero_broken = True
 
         if bot_zero_broken and cross_down:
-            # DIF 曾升破 0，前一波 W 底基準作廢，重置
-            prev_bot_dif   = 0.0
-            prev_bot_date  = None
-            prev_bot_close = 0.0
+            prev_bot_dif = 0.0; prev_bot_date = None; prev_bot_close = 0.0
             bot_zero_broken = False
 
         if cross_up:
-            # 綠柱波段結束
             in_grn = False
-
-            # ── 副圖：在「前一波 DIF 低點那天（prev_bot_date）」標數值 ──
             if prev_bot_date is not None and prev_bot_dif < 0:
-                markers_macd.append({
-                    "time":     prev_bot_date,      # ← 前一波 DIF 低點那天
-                    "position": "belowBar",
-                    "color":    "#00E676",
-                    "shape":    "text",
-                    "text":     f"{prev_bot_dif:.2f}"
-                })
-
-            # ── 主圖：背離判斷 ──
-            if (cur_bot_dif < 0 and prev_bot_dif < 0
-                    and cur_bot_dif > prev_bot_dif        # DIF 收斂（絕對值變小）
-                    and cur_wave_low <= prev_bot_close    # 股價破/同前一波 DIF 低點那天的股價
-                    and prev_bot_date is not None):
+                markers_macd.append({"time": prev_bot_date, "position": "belowBar", "color": "#00E676", "shape": "text", "text": f"{prev_bot_dif:.2f}"})
+            if (cur_bot_dif < 0 and prev_bot_dif < 0 and cur_bot_dif > prev_bot_dif and cur_wave_low <= prev_bot_close and prev_bot_date is not None):
                 lbl = "价同" if cur_wave_low == prev_bot_close else "价破"
-                markers_price.append({
-                    "time":     prev_bot_date,      # ← 前一波 DIF 低點那天
-                    "position": "belowBar",
-                    "color":    "#26a69a",
-                    "shape":    "arrowUp",
-                    "text":     f"W{prefix}\n{lbl}\n{prev_bot_close:.2f}"
-                })
-
-            # 本波結束，本波變成「前一波」
+                markers_price.append({"time": prev_bot_date, "position": "belowBar", "color": "#26a69a", "shape": "arrowUp", "text": f"W{prefix}\n{lbl}\n{prev_bot_close:.2f}"})
             if cur_bot_dif < 0:
-                prev_bot_dif   = cur_bot_dif
-                prev_bot_date  = cur_bot_date
-                prev_bot_close = cur_bot_close
+                prev_bot_dif = cur_bot_dif; prev_bot_date = cur_bot_date; prev_bot_close = cur_bot_close
+            cur_bot_dif = 0.0; cur_bot_date = None; cur_bot_close = 0.0; cur_wave_low = 1e9
 
-            # 重置當前波
-            cur_bot_dif   = 0.0
-            cur_bot_date  = None
-            cur_bot_close = 0.0
-            cur_wave_low  = 1e9
-
-        # 在綠柱波段中：追蹤 DIF 低點 & 股價低點
         if hist < 0:
             if dif < cur_bot_dif:
-                cur_bot_dif   = dif
-                cur_bot_date  = date
-                cur_bot_close = low
+                cur_bot_dif = dif; cur_bot_date = date; cur_bot_close = low
             if low < cur_wave_low:
                 cur_wave_low = low
 
-        # ══════════════════════════════════════════════
-        # 最後一根 bar：處理「未完成波段」
-        # ══════════════════════════════════════════════
         if i == len(df_res) - 1:
-
-            # 未完成 M 頂
             if hist > 0 and cur_top_dif > 0 and prev_top_dif > 0:
-                # 副圖：標前一波 DIF 高點數值
                 if prev_top_date is not None:
-                    markers_macd.append({
-                        "time":     prev_top_date,
-                        "position": "aboveBar",
-                        "color":    "#FFD600",
-                        "shape":    "text",
-                        "text":     f"{prev_top_dif:.2f}"
-                    })
-                # 主圖：未M箭頭
-                if (cur_top_dif < prev_top_dif
-                        and cur_wave_high >= prev_top_close
-                        and prev_top_date is not None):
+                    markers_macd.append({"time": prev_top_date, "position": "aboveBar", "color": "#FFD600", "shape": "text", "text": f"{prev_top_dif:.2f}"})
+                if cur_top_dif < prev_top_dif and cur_wave_high >= prev_top_close and prev_top_date is not None:
                     lbl = "价同" if cur_wave_high == prev_top_close else "价破"
-                    markers_price.append({
-                        "time":     prev_top_date,
-                        "position": "aboveBar",
-                        "color":    "#ef5350",
-                        "shape":    "arrowDown",
-                        "text":     f"未M{prefix}\n{lbl}\n{prev_top_close:.2f}"
-                    })
-
-            # 未完成 W 底
+                    markers_price.append({"time": prev_top_date, "position": "aboveBar", "color": "#ef5350", "shape": "arrowDown", "text": f"未M{prefix}\n{lbl}\n{prev_top_close:.2f}"})
             if hist < 0 and cur_bot_dif < 0 and prev_bot_dif < 0:
-                # 副圖：標前一波 DIF 低點數值
                 if prev_bot_date is not None:
-                    markers_macd.append({
-                        "time":     prev_bot_date,
-                        "position": "belowBar",
-                        "color":    "#00E676",
-                        "shape":    "text",
-                        "text":     f"{prev_bot_dif:.2f}"
-                    })
-                # 主圖：未W箭頭
-                if (cur_bot_dif > prev_bot_dif
-                        and cur_wave_low <= prev_bot_close
-                        and prev_bot_date is not None):
+                    markers_macd.append({"time": prev_bot_date, "position": "belowBar", "color": "#00E676", "shape": "text", "text": f"{prev_bot_dif:.2f}"})
+                if cur_bot_dif > prev_bot_dif and cur_wave_low <= prev_bot_close and prev_bot_date is not None:
                     lbl = "价同" if cur_wave_low == prev_bot_close else "价破"
-                    markers_price.append({
-                        "time":     prev_bot_date,
-                        "position": "belowBar",
-                        "color":    "#26a69a",
-                        "shape":    "arrowUp",
-                        "text":     f"未W{prefix}\n{lbl}\n{prev_bot_close:.2f}"
-                    })
+                    markers_price.append({"time": prev_bot_date, "position": "belowBar", "color": "#26a69a", "shape": "arrowUp", "text": f"未W{prefix}\n{lbl}\n{prev_bot_close:.2f}"})
 
-    # ─── 去重 ─────────────────────────────────────────────────
     def dedup(lst):
         seen, out = set(), []
         for m in reversed(lst):
             k = f"{m['time']}_{m['text']}"
             if k not in seen:
-                seen.add(k)
-                out.append(m)
+                seen.add(k); out.append(m)
         out.reverse()
         return out
 
@@ -982,7 +818,6 @@ def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
 
 
 def merge_kline_markers(markers):
-    """將同一天發生的多個 K 線標籤合併，避免互相覆蓋"""
     merged = {}
     for m in markers:
         t = m['time']
@@ -997,32 +832,38 @@ def merge_kline_markers(markers):
 with tab4:
     if st.session_state.auto_draw:
         st.success("✅ 參數已帶入！請直接查看下方圖表。")
-        
-    col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns([1, 1.5, 1, 1, 1])
-    
-    with col_t1:
+
+    # ── 第一排：股票代號 + 繪圖按鈕 ──
+    c_sid, c_draw = st.columns([3, 1])
+    with c_sid:
         t4_sid = st.text_input("股票代號", value=st.session_state.get('t4_target_sid', '6488'))
-    with col_t2:
-        all_br_names = sorted(list(BROKER_MAP.keys()))
-        t4_br_val = st.session_state.get('t4_target_br', '兆豐-忠孝')
-        idx = all_br_names.index(t4_br_val) if t4_br_val in all_br_names else 0
-        t4_br_name = st.selectbox("搜尋分點", all_br_names, index=idx)
-    with col_t3: 
-        t4_period = st.radio("週期", ["日", "週", "月"], horizontal=True)
-    with col_t4: 
-        t4_days = st.number_input("K棒數", value=200, min_value=10, max_value=1000)
-    with col_t5:
-        st.write("") 
-        draw_btn = st.button("🎨 繪圖", width="stretch")
-        
-    col_x1, col_x2_1, col_x2_2, col_x3 = st.columns([1.5, 2, 1, 1.5])
-    with col_x1:
-        fav_btn = st.button("❤️ 存入清單", width="stretch")
-    with col_x2_1:
-        hline_val = st.number_input("📏 水平線價格", value=0.0, step=1.0, key="hline_val_input")
-    with col_x2_2:
+    with c_draw:
         st.write("")
-        if st.button("➕ 加入畫線", width="stretch"):
+        draw_btn = st.button("🎨 繪圖", use_container_width=True)
+
+    # ── 第二排：搜尋分點（獨佔一行，手機友善） ──
+    all_br_names = sorted(list(BROKER_MAP.keys()))
+    t4_br_val = st.session_state.get('t4_target_br', '兆豐-忠孝')
+    idx = all_br_names.index(t4_br_val) if t4_br_val in all_br_names else 0
+    t4_br_name = st.selectbox("搜尋分點", all_br_names, index=idx)
+
+    # ── 第三排：週期 + K棒數 ──
+    c_period, c_days = st.columns([1, 1])
+    with c_period:
+        t4_period = st.radio("週期", ["日", "週", "月"], horizontal=True)
+    with c_days:
+        t4_days = st.number_input("K棒數", value=200, min_value=10, max_value=1000)
+
+    # ── 第四排：存入清單 + 水平線操作 ──
+    c_fav, c_hval, c_hadd, c_hclr = st.columns([1, 1, 1, 1])
+    with c_fav:
+        st.write("")
+        fav_btn = st.button("❤️ 存入清單", use_container_width=True)
+    with c_hval:
+        hline_val = st.number_input("📏 水平線價格", value=0.0, step=1.0, key="hline_val_input")
+    with c_hadd:
+        st.write("")
+        if st.button("➕ 加入畫線", use_container_width=True):
             if hline_val > 0 and hline_val not in st.session_state.custom_hlines:
                 st.session_state.custom_hlines.append(hline_val)
             st.session_state.t4_target_sid = t4_sid
@@ -1030,16 +871,16 @@ with tab4:
             st.session_state.auto_draw = True
             st.session_state.chart_render_key += 1
             st.rerun()
-    with col_x3:
+    with c_hclr:
         st.write("")
-        if st.button("🗑️ 清除所有畫線", width="stretch"):
+        if st.button("🗑️ 清除畫線", use_container_width=True):
             st.session_state.custom_hlines = []
             st.session_state.t4_target_sid = t4_sid
             st.session_state.t4_target_br = t4_br_name
             st.session_state.auto_draw = True
             st.session_state.chart_render_key += 1
             st.rerun()
-    
+
     t4_sid_clean = t4_sid.strip().upper()
 
     # 🌟 GSheets: 新增清單
@@ -1047,8 +888,6 @@ with tab4:
         entry = {"股票代號": t4_sid_clean, "追蹤分點": t4_br_name}
         if entry not in st.session_state.watchlist:
             st.session_state.watchlist.append(entry)
-            
-            # 寫入雲端並接收狀態
             success, msg = save_gsheet_watchlist(current_user, st.session_state.watchlist)
             if success:
                 st.success(f"✅ 已存入【{current_user}】專屬雲端清單！")
@@ -1079,24 +918,18 @@ with tab4:
 
     if st.session_state.watchlist:
         with st.expander(f"⭐ 【{current_user}】的專屬主力清單", expanded=True):
-            
             if 'wl_refresh_key' not in st.session_state:
                 st.session_state.wl_refresh_key = 0
-                
             wl_df = pd.DataFrame(st.session_state.watchlist)
             wl_df.insert(0, '載入', False)
             wl_df['刪除'] = False
             wl_config = {"載入": st.column_config.CheckboxColumn("載入繪圖"), "刪除": st.column_config.CheckboxColumn("刪除")}
-            
             editor_key = f"wl_editor_{st.session_state.wl_refresh_key}"
             st.data_editor(wl_df, hide_index=True, column_config=wl_config, width="stretch", key=editor_key)
-            
             if editor_key in st.session_state:
                 edits = st.session_state[editor_key].get('edited_rows', {})
                 action_taken = False
-                
                 for row_idx, changes in edits.items():
-                    # 處理「載入」點擊
                     if changes.get('載入', False) == True:
                         st.session_state.t4_target_sid = wl_df.iloc[row_idx]['股票代號']
                         st.session_state.t4_target_br = wl_df.iloc[row_idx]['追蹤分點']
@@ -1104,19 +937,15 @@ with tab4:
                         st.session_state.chart_render_key += 1
                         action_taken = True
                         break 
-                        
-                    # 處理「刪除」點擊
                     if changes.get('刪除', False) == True:
                         del_sid = wl_df.iloc[row_idx]['股票代號']
                         del_br = wl_df.iloc[row_idx]['追蹤分點']
                         st.session_state.watchlist = [item for item in st.session_state.watchlist if not (item['股票代號'] == del_sid and item['追蹤分點'] == del_br)]
-                        
                         success, msg = save_gsheet_watchlist(current_user, st.session_state.watchlist)
                         if not success:
                             st.error(f"雲端刪除同步失敗: {msg}")
                         action_taken = True
                         break
-
                 if action_taken:
                     st.session_state.wl_refresh_key += 1
                     st.rerun()
@@ -1129,10 +958,8 @@ with tab4:
         st.session_state.auto_draw = False 
         st.session_state.show_chart = True
         st.session_state.chart_render_key += 1
-        
         st.session_state.t4_target_sid = t4_sid
         st.session_state.t4_target_br = t4_br_name
-        
         st.session_state.drawn_sid = t4_sid
         st.session_state.drawn_br_name = t4_br_name
         st.session_state.drawn_period = t4_period
@@ -1179,12 +1006,10 @@ with tab4:
                     df_resampled['M1_hist'] = hist1
                     df_resampled['M1_macd'] = macd1
                     df_resampled['M1_sig'] = sig1
-                    
                     df_resampled['M2_hist'] = hist2
                     df_resampled['M2_macd'] = macd2
                     df_resampled['M2_sig'] = sig2
                     
-                    # 🌟 計算所有的背離標記點與 MACD 極值點
                     markers_price_m1, markers_macd_m1 = get_pine_divergence_markers(df_resampled, 'M1_macd', 'M1_hist', 'S')
                     markers_price_m2, markers_macd_m2 = get_pine_divergence_markers(df_resampled, 'M2_macd', 'M2_hist', 'L')
                     
@@ -1200,7 +1025,6 @@ with tab4:
                     all_data = []
                     for i, row in df_plot.iterrows():
                         if pd.isna(row['Close']): continue
-                        
                         item = {
                             "time": row['Date_str'],
                             "open": safe_float(row['Open']), "high": safe_float(row['High']),
@@ -1210,15 +1034,12 @@ with tab4:
                         if not pd.isna(row['BB_mid']): item["bbm"] = safe_float(row['BB_mid'])
                         if not pd.isna(row['BB_up']): item["bbu"] = safe_float(row['BB_up'])
                         if not pd.isna(row['BB_dn']): item["bbd"] = safe_float(row['BB_dn'])
-                        
                         if not pd.isna(row['M1_hist']): item["h1"] = safe_float(row['M1_hist'])
                         if not pd.isna(row['M1_macd']): item["m1"] = safe_float(row['M1_macd'])
                         if not pd.isna(row['M1_sig']): item["s1"] = safe_float(row['M1_sig'])
-
                         if not pd.isna(row['M2_hist']): item["h2"] = safe_float(row['M2_hist'])
                         if not pd.isna(row['M2_macd']): item["m2"] = safe_float(row['M2_macd'])
                         if not pd.isna(row['M2_sig']): item["s2"] = safe_float(row['M2_sig'])
-
                         all_data.append(item)
 
                     hlines_js_array = json.dumps(st.session_state.custom_hlines)
@@ -1233,7 +1054,6 @@ with tab4:
                             body {{ margin: 0; padding: 0; background-color: #131722; overflow: hidden; font-family: "Microsoft JhengHei", sans-serif; }}
                             #wrapper {{ position: relative; width: 100vw; height: 95vh; }}
                             #chart {{ width: 100%; height: 100%; }}
-                            
                             .tv-legend {{
                                 position: absolute; left: 12px; top: 12px; z-index: 999; font-size: 13px; color: #d1d4dc; 
                                 pointer-events: none; background: rgba(19, 23, 34, 0.85); padding: 8px 12px; 
@@ -1244,8 +1064,6 @@ with tab4:
                             .lg-label {{ color: #a0a3ab; }}
                             .lg-vol {{ margin-top: 6px; padding-top: 6px; border-top: 1px dashed #555; font-size: 15px; display: flex; justify-content: space-between; font-weight: bold; }}
                             .lg-macd {{ margin-top: 6px; font-size: 12px; color: #8a8d9d; line-height: 1.4; }}
-                            
-                            /* 手機版專屬畫線按鈕 */
                             #mobileDrawBtn {{
                                 position: absolute; right: 12px; top: 12px; z-index: 1000;
                                 background-color: #ef5350; color: white; border: none;
@@ -1265,22 +1083,17 @@ with tab4:
                         <script>
                             const rawData = {json.dumps(all_data)};
                             const hlines = {hlines_js_array};
-                            
                             const markersPrice = {json.dumps(final_markers_price)};
                             const markersMacd1 = {json.dumps(final_markers_macd_m1)};
                             const markersMacd2 = {json.dumps(final_markers_macd_m2)};
-                            
                             const enableClickLine = {'true' if enable_click_line else 'false'};
                             
                             const layoutOptions = {{ 
                                 layout: {{ backgroundColor: '#131722', textColor: '#d1d4dc' }},
                                 watermark: {{
-                                    color: 'rgba(255, 255, 255, 0.08)',
-                                    visible: true,
-                                    text: '{drawn_sid_clean} {stock_name}',
-                                    fontSize: 80,
-                                    horzAlign: 'center',
-                                    vertAlign: 'center',
+                                    color: 'rgba(255, 255, 255, 0.08)', visible: true,
+                                    text: '{drawn_sid_clean} {stock_name}', fontSize: 80,
+                                    horzAlign: 'center', vertAlign: 'center',
                                 }},
                                 grid: {{ vertLines: {{ color: '#242733' }}, horzLines: {{ color: '#242733' }} }}, 
                                 crosshair: {{ mode: LightweightCharts.CrosshairMode.Normal }},
@@ -1299,16 +1112,12 @@ with tab4:
                             }};
                             
                             const chart = LightweightCharts.createChart(document.getElementById('chart'), layoutOptions);
-                            
                             chart.priceScale('right').applyOptions({{ scaleMargins: {{ top: 0.02, bottom: 0.45 }} }});
 
-                            // K線
                             const seriesK = chart.addCandlestickSeries({{ upColor: '#ef5350', downColor: '#26a69a', borderVisible: false, wickUpColor: '#ef5350', wickDownColor: '#26a69a' }});
                             seriesK.setData(rawData.map(d => ({{time: d.time, open: d.open, high: d.high, low: d.low, close: d.close}})));
-                            
                             seriesK.setMarkers(markersPrice);
                             
-                            // BB
                             const bbMid = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             bbMid.setData(rawData.filter(d => d.bbm !== undefined).map(d => ({{time: d.time, value: d.bbm}})));
                             const bbUp = chart.addLineSeries({{ color: 'rgba(255, 255, 255, 0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
@@ -1316,40 +1125,30 @@ with tab4:
                             const bbDn = chart.addLineSeries({{ color: 'rgba(255, 255, 255, 0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             bbDn.setData(rawData.filter(d => d.bbd !== undefined).map(d => ({{time: d.time, value: d.bbd}})));
                             
-                            // 買賣超
                             const seriesVol = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'vol', lastValueVisible: false, priceLineVisible: false }});
                             seriesVol.setData(rawData.map(d => ({{time: d.time, value: d.vol, color: d.vol >= 0 ? 'rgba(239, 83, 80, 0.8)' : 'rgba(38, 166, 154, 0.8)'}})));
                             chart.priceScale('vol').applyOptions({{ scaleMargins: {{ top: 0.58, bottom: 0.28 }}, visible: false }});
                             
-                            // MACD 短線
                             const seriesH1 = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'm1', lastValueVisible: false, priceLineVisible: false }});
                             seriesH1.setData(rawData.filter(d => d.h1 !== undefined).map(d => ({{time: d.time, value: d.h1, color: d.h1 >= 0 ? 'rgba(239, 83, 80, 0.5)' : 'rgba(38, 166, 154, 0.5)'}})));
                             const seriesM1 = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, priceScaleId: 'm1', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             seriesM1.setData(rawData.filter(d => d.m1 !== undefined).map(d => ({{time: d.time, value: d.m1}})));
-                            
                             seriesM1.setMarkers(markersMacd1);
-                            
                             const seriesS1 = chart.addLineSeries({{ color: '#00E676', lineWidth: 1, priceScaleId: 'm1', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             seriesS1.setData(rawData.filter(d => d.s1 !== undefined).map(d => ({{time: d.time, value: d.s1}})));
                             chart.priceScale('m1').applyOptions({{ scaleMargins: {{ top: 0.72, bottom: 0.15 }}, visible: false }});
 
-                            // MACD 長線
                             const seriesH2 = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'm2', lastValueVisible: false, priceLineVisible: false }});
                             seriesH2.setData(rawData.filter(d => d.h2 !== undefined).map(d => ({{time: d.time, value: d.h2, color: d.h2 >= 0 ? 'rgba(239, 83, 80, 0.5)' : 'rgba(38, 166, 154, 0.5)'}})));
                             const seriesM2 = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, priceScaleId: 'm2', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             seriesM2.setData(rawData.filter(d => d.m2 !== undefined).map(d => ({{time: d.time, value: d.m2}})));
-                            
                             seriesM2.setMarkers(markersMacd2);
-                            
                             const seriesS2 = chart.addLineSeries({{ color: '#00E676', lineWidth: 1, priceScaleId: 'm2', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             seriesS2.setData(rawData.filter(d => d.s2 !== undefined).map(d => ({{time: d.time, value: d.s2}})));
                             chart.priceScale('m2').applyOptions({{ scaleMargins: {{ top: 0.85, bottom: 0.0 }}, visible: false }});
 
                             hlines.forEach(val => {{
-                                seriesK.createPriceLine({{
-                                    price: val, color: '#2962FF', lineWidth: 2, lineStyle: 2, 
-                                    axisLabelVisible: true, title: '📏',
-                                }});
+                                seriesK.createPriceLine({{ price: val, color: '#2962FF', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: '📏' }});
                             }});
 
                             const legend = document.getElementById('legend');
@@ -1365,19 +1164,14 @@ with tab4:
                                 if(!param.time || param.point === undefined || param.point.x < 0 || param.point.y < 0) {{
                                     legend.innerHTML = '將滑鼠(或手指)移至 K 線上查看數據'; return;
                                 }}
-                                
                                 lastCrosshairParam = param;
-                                
                                 let timeStr = param.time;
                                 if (typeof timeStr === 'object' && timeStr.year) {{
                                     timeStr = timeStr.year + '-' + String(timeStr.month).padStart(2, '0') + '-' + String(timeStr.day).padStart(2, '0');
                                 }}
-
                                 const d = dictByTime[timeStr] || dictByTime[param.time];
                                 if(!d) return;
-
                                 const vColor = d.vol >= 0 ? '#ef5350' : '#26a69a';
-                                
                                 let html = `
                                     <div class="lg-title">{drawn_sid_clean} {stock_name} | ${{timeStr}} ${{getDayOfWeek(timeStr)}}</div>
                                     <div class="lg-row"><span class="lg-label">開盤</span><span style="color:white;">${{d.open.toFixed(2)}}</span></div>
@@ -1386,69 +1180,46 @@ with tab4:
                                     <div class="lg-row"><span class="lg-label">收盤</span><span style="color:white;font-weight:bold;">${{d.close.toFixed(2)}}</span></div>
                                     <div class="lg-vol"><span class="lg-label">買賣 ({drawn_br_name})</span> <span style="color:${{vColor}};">${{d.vol}} 張</span></div>
                                 `;
-
                                 if(d.h1 !== undefined) html += `<div class="lg-macd"><b>短 MACD:</b> 柱 <span style="color:${{d.h1>=0?'#ef5350':'#26a69a'}}">${{d.h1.toFixed(2)}}</span> | 快 <span style="color:#FFD600">${{d.m1.toFixed(2)}}</span> | 慢 <span style="color:#00E676">${{d.s1.toFixed(2)}}</span></div>`;
                                 if(d.h2 !== undefined) html += `<div class="lg-macd"><b>長 MACD:</b> 柱 <span style="color:${{d.h2>=0?'#ef5350':'#26a69a'}}">${{d.h2.toFixed(2)}}</span> | 快 <span style="color:#FFD600">${{d.m2.toFixed(2)}}</span> | 慢 <span style="color:#00E676">${{d.s2.toFixed(2)}}</span></div>`;
-                                
                                 legend.innerHTML = html;
                             }});
 
                             mobileDrawBtn.addEventListener('click', () => {{
                                 if(!lastCrosshairParam || !lastCrosshairParam.time || lastCrosshairParam.point === undefined || lastCrosshairParam.point.y < 0) {{
-                                    alert('請先觸碰圖表，將十字線移動到指定的 K 棒上！');
-                                    return;
+                                    alert('請先觸碰圖表，將十字線移動到指定的 K 棒上！'); return;
                                 }}
-                                
                                 let timeStr = lastCrosshairParam.time;
                                 if (typeof timeStr === 'object' && timeStr.year) {{
                                     timeStr = timeStr.year + '-' + String(timeStr.month).padStart(2, '0') + '-' + String(timeStr.day).padStart(2, '0');
                                 }}
-
                                 const d = dictByTime[timeStr] || dictByTime[lastCrosshairParam.time];
                                 if(!d) return;
-
                                 const clickedPrice = seriesK.coordinateToPrice(lastCrosshairParam.point.y);
                                 if(clickedPrice === null) return;
-
                                 const midPrice = (d.high + d.low) / 2;
-                                
                                 let targetPrice, lineColor, lineTitle;
                                 if (clickedPrice >= midPrice) {{
-                                    targetPrice = d.high;
-                                    lineColor = '#ef5350'; 
-                                    lineTitle = '壓力 ' + targetPrice.toFixed(2);
+                                    targetPrice = d.high; lineColor = '#ef5350'; lineTitle = '壓力 ' + targetPrice.toFixed(2);
                                 }} else {{
-                                    targetPrice = d.low;
-                                    lineColor = '#26a69a'; 
-                                    lineTitle = '支撐 ' + targetPrice.toFixed(2);
+                                    targetPrice = d.low; lineColor = '#26a69a'; lineTitle = '支撐 ' + targetPrice.toFixed(2);
                                 }}
-
                                 const raySeries = chart.addLineSeries({{
-                                    color: lineColor,
-                                    lineWidth: 2,
-                                    lineStyle: 2, 
-                                    lastValueVisible: true,
-                                    priceLineVisible: false,
-                                    crosshairMarkerVisible: false,
-                                    title: lineTitle
+                                    color: lineColor, lineWidth: 2, lineStyle: 2, 
+                                    lastValueVisible: true, priceLineVisible: false,
+                                    crosshairMarkerVisible: false, title: lineTitle
                                 }});
-
                                 const lastDataTime = rawData[rawData.length - 1].time;
                                 if (d.time === lastDataTime) {{
                                     raySeries.setData([ {{ time: d.time, value: targetPrice }} ]);
                                 }} else {{
-                                    raySeries.setData([
-                                        {{ time: d.time, value: targetPrice }},
-                                        {{ time: lastDataTime, value: targetPrice }}
-                                    ]);
+                                    raySeries.setData([ {{ time: d.time, value: targetPrice }}, {{ time: lastDataTime, value: targetPrice }} ]);
                                 }}
                             }});
 
                             chart.subscribeClick(param => {{
                                 if(!enableClickLine) return;
-                                if(param.point && param.point.x < window.innerWidth - 100) {{
-                                     mobileDrawBtn.click();
-                                }}
+                                if(param.point && param.point.x < window.innerWidth - 100) {{ mobileDrawBtn.click(); }}
                             }});
 
                             new ResizeObserver(() => {{
