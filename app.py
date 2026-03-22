@@ -1142,7 +1142,7 @@ with tab4:
                             const chart = LightweightCharts.createChart(document.getElementById('chart'), layoutOptions);
                             chart.priceScale('right').applyOptions({{ scaleMargins: {{ top: 0.02, bottom: 0.45 }} }});
 
-                            const seriesK = chart.addCandlestickSeries({{ upColor: '#ef5350', downColor: '#26a69a', borderVisible: false, wickUpColor: '#ef5350', wickDownColor: '#26a69a' }});
+                            const seriesK = chart.addCandlestickSeries({{ upColor: '#ef5350', downColor: '#26a69a', borderVisible: false, wickUpColor: '#ef5350', wickDownColor: '#26a69a', priceLineVisible: false }});
                             seriesK.setData(rawData.map(d => ({{time: d.time, open: d.open, high: d.high, low: d.low, close: d.close}})));
                             seriesK.setMarkers(markersPrice);
 
