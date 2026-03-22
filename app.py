@@ -37,6 +37,10 @@ st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 # 🔒 進入門檻：通行密碼與免登書籤系統
 # ==========================================
 def check_password():
+    # 🟢 新增此兩行：若已登入，直接放行，避免閒置喚醒時重複清除網址導致 Redirect 迴圈
+    if st.session_state.get("password_correct") == True: 
+        return True
+
     valid_passwords = st.secrets.get("passwords", {"測試帳號": "0000|2099-12-31"})
     query_params = st.query_params
     
@@ -914,7 +918,7 @@ with tab4:
 
                     hlines_js_array = json.dumps(st.session_state.custom_hlines)
 
-                    html_code = f"""
+                   html_code = f"""
                     <!DOCTYPE html>
                     <html>
                     <head>
@@ -935,16 +939,29 @@ with tab4:
                             .lg-label {{ color: #a0a3ab; }}
                             .lg-vol {{ margin-top: 6px; padding-top: 6px; border-top: 1px dashed #555; font-size: 15px; display: flex; justify-content: space-between; font-weight: bold; }}
                             .lg-macd {{ margin-top: 6px; font-size: 12px; color: #8a8d9d; line-height: 1.4; }}
+                            
+                            /* 手機版專屬畫線按鈕 */
+                            #mobileDrawBtn {{
+                                position: absolute; right: 12px; top: 12px; z-index: 1000;
+                                background-color: #ef5350; color: white; border: none;
+                                padding: 10px 16px; font-size: 14px; font-weight: bold;
+                                border-radius: 8px; cursor: pointer; display: none;
+                                box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+                            }}
+                            #mobileDrawBtn:active {{ background-color: #c62828; }}
                         </style>
                     </head>
                     <body>
                         <div id="wrapper">
                             <div id="chart"></div>
-                            <div id="legend" class="tv-legend">將滑鼠移至 K 線上查看數據</div>
+                            <div id="legend" class="tv-legend">將滑鼠(或手指)移至 K 線上查看數據</div>
+                            <!-- 懸浮畫線按鈕 -->
+                            <button id="mobileDrawBtn">✏️ 畫線於此</button>
                         </div>
                         <script>
                             const rawData = {json.dumps(all_data)};
                             const hlines = {hlines_js_array};
+                            const enableClickLine = {'true' if enable_click_line else 'false'};
                             
                             const layoutOptions = {{ 
                                 layout: {{ backgroundColor: '#131722', textColor: '#d1d4dc' }},
@@ -974,9 +991,7 @@ with tab4:
                             
                             const chart = LightweightCharts.createChart(document.getElementById('chart'), layoutOptions);
                             
-                            chart.priceScale('right').applyOptions({{
-                                scaleMargins: {{ top: 0.02, bottom: 0.45 }}
-                            }});
+                            chart.priceScale('right').applyOptions({{ scaleMargins: {{ top: 0.02, bottom: 0.45 }} }});
 
                             // K線
                             const seriesK = chart.addCandlestickSeries({{ upColor: '#ef5350', downColor: '#26a69a', borderVisible: false, wickUpColor: '#ef5350', wickDownColor: '#26a69a' }});
@@ -1022,13 +1037,24 @@ with tab4:
                             }});
 
                             const legend = document.getElementById('legend');
+                            const mobileDrawBtn = document.getElementById('mobileDrawBtn');
                             const getDayOfWeek = (dStr) => ['週日', '週一', '週二', '週三', '週四', '週五', '週六'][new Date(dStr).getDay()];
                             const dictByTime = {{}}; rawData.forEach(d => dictByTime[d.time] = d);
+                            
+                            // 如果有打勾「啟用點擊自動畫線」，就顯示那顆紅色畫線按鈕
+                            if(enableClickLine) {{
+                                mobileDrawBtn.style.display = 'block';
+                            }}
+
+                            let lastCrosshairParam = null;
 
                             chart.subscribeCrosshairMove(param => {{
                                 if(!param.time || param.point === undefined || param.point.x < 0 || param.point.y < 0) {{
-                                    legend.innerHTML = '將滑鼠移至 K 線上查看數據'; return;
+                                    legend.innerHTML = '將滑鼠(或手指)移至 K 線上查看數據'; return;
                                 }}
+                                
+                                // 隨時記錄十字線的位置，給畫線按鈕使用
+                                lastCrosshairParam = param;
                                 
                                 let timeStr = param.time;
                                 if (typeof timeStr === 'object' && timeStr.year) {{
@@ -1046,7 +1072,7 @@ with tab4:
                                     <div class="lg-row"><span class="lg-label">最高</span><span style="color:#ef5350;">${{d.high.toFixed(2)}}</span></div>
                                     <div class="lg-row"><span class="lg-label">最低</span><span style="color:#26a69a;">${{d.low.toFixed(2)}}</span></div>
                                     <div class="lg-row"><span class="lg-label">收盤</span><span style="color:white;font-weight:bold;">${{d.close.toFixed(2)}}</span></div>
-                                    <div class="lg-vol"><span class="lg-label">買賣超 ({drawn_br_name})</span> <span style="color:${{vColor}};">${{d.vol}} 張</span></div>
+                                    <div class="lg-vol"><span class="lg-label">買賣 ({drawn_br_name})</span> <span style="color:${{vColor}};">${{d.vol}} 張</span></div>
                                 `;
 
                                 if(d.h1 !== undefined) html += `<div class="lg-macd"><b>短 MACD:</b> 柱 <span style="color:${{d.h1>=0?'#ef5350':'#26a69a'}}">${{d.h1.toFixed(2)}}</span> | 快 <span style="color:#FFD600">${{d.m1.toFixed(2)}}</span> | 慢 <span style="color:#00E676">${{d.s1.toFixed(2)}}</span></div>`;
@@ -1056,44 +1082,40 @@ with tab4:
                             }});
 
                             // ==========================================
-                            // 🆕 點擊 K 棒自動畫出水平射線 (支撐/壓力線) 防誤觸版
+                            // 🆕 手機友好版：點擊按鈕，在目前十字線位置畫線
                             // ==========================================
-                            const enableClickLine = {'true' if enable_click_line else 'false'};
-                            
-                            chart.subscribeClick(param => {{
-                                // 確保有開啟功能並點擊到圖表有效範圍
-                                if(!enableClickLine) return;
-                                if(!param.time || param.point === undefined || param.point.y < 0) return;
-
-                                let timeStr = param.time;
+                            mobileDrawBtn.addEventListener('click', () => {{
+                                if(!lastCrosshairParam || !lastCrosshairParam.time || lastCrosshairParam.point === undefined || lastCrosshairParam.point.y < 0) {{
+                                    alert('請先觸碰圖表，將十字線移動到指定的 K 棒上！');
+                                    return;
+                                }}
+                                
+                                let timeStr = lastCrosshairParam.time;
                                 if (typeof timeStr === 'object' && timeStr.year) {{
                                     timeStr = timeStr.year + '-' + String(timeStr.month).padStart(2, '0') + '-' + String(timeStr.day).padStart(2, '0');
                                 }}
 
-                                // 取出點擊那一天的 K 棒數據
-                                const d = dictByTime[timeStr] || dictByTime[param.time];
+                                const d = dictByTime[timeStr] || dictByTime[lastCrosshairParam.time];
                                 if(!d) return;
 
-                                // 將滑鼠點擊的 Y 軸座標換算成價格
-                                const clickedPrice = seriesK.coordinateToPrice(param.point.y);
+                                // 抓取游標(或手指)的最後 Y 座標換算價格
+                                const clickedPrice = seriesK.coordinateToPrice(lastCrosshairParam.point.y);
                                 if(clickedPrice === null) return;
 
-                                // 計算 K 棒一半的位置
                                 const midPrice = (d.high + d.low) / 2;
                                 
                                 let targetPrice, lineColor, lineTitle;
-                                // 判斷：點在 K 棒中線以上 -> 抓高點 (壓力)；點在以下 -> 抓低點 (支撐)
+                                // 手指在 K 棒中線之上畫紅線(壓力)，在下畫綠線(支撐)
                                 if (clickedPrice >= midPrice) {{
                                     targetPrice = d.high;
-                                    lineColor = '#ef5350'; // 紅色
+                                    lineColor = '#ef5350'; 
                                     lineTitle = '壓力 ' + targetPrice.toFixed(2);
                                 }} else {{
                                     targetPrice = d.low;
-                                    lineColor = '#26a69a'; // 綠色
+                                    lineColor = '#26a69a'; 
                                     lineTitle = '支撐 ' + targetPrice.toFixed(2);
                                 }}
 
-                                // 創建一個向右延伸的射線
                                 const raySeries = chart.addLineSeries({{
                                     color: lineColor,
                                     lineWidth: 2,
@@ -1105,8 +1127,6 @@ with tab4:
                                 }});
 
                                 const lastDataTime = rawData[rawData.length - 1].time;
-                                
-                                // 避開如果點擊的就是最新一天，兩個端點相同的問題
                                 if (d.time === lastDataTime) {{
                                     raySeries.setData([ {{ time: d.time, value: targetPrice }} ]);
                                 }} else {{
@@ -1114,6 +1134,15 @@ with tab4:
                                         {{ time: d.time, value: targetPrice }},
                                         {{ time: lastDataTime, value: targetPrice }}
                                     ]);
+                                }}
+                            }});
+
+                            // 保留電腦版雙擊或點擊功能 (相容滑鼠)
+                            chart.subscribeClick(param => {{
+                                // 電腦版點擊圖表也可觸發畫線(需打勾)
+                                if(!enableClickLine) return;
+                                if(param.point && param.point.x < window.innerWidth - 100) {{ // 避免按到按鈕時誤判
+                                     mobileDrawBtn.click();
                                 }}
                             }});
 
