@@ -962,7 +962,22 @@ with tab4:
                     st.rerun()
 
     st.markdown("---")
-    enable_click_line = st.checkbox("👆 啟用點擊 K 棒自動畫線 (防止手機滑動時誤觸)", value=False)
+
+    # 用 session_state 記住上次的 checkbox 狀態，狀態改變時自動重繪（不清除線條）
+    if 'enable_click_line' not in st.session_state:
+        st.session_state.enable_click_line = False
+
+    def on_click_line_change():
+        # checkbox 改變時，若圖表已顯示則自動重繪保留畫面
+        if st.session_state.get('show_chart', False):
+            st.session_state.chart_render_key += 1
+
+    enable_click_line = st.checkbox(
+        "👆 啟用點擊 K 棒自動畫線 (防止手機滑動時誤觸)",
+        value=st.session_state.enable_click_line,
+        key="enable_click_line",
+        on_change=on_click_line_change
+    )
 
     # 執行繪圖
     if draw_btn or st.session_state.auto_draw:
