@@ -694,42 +694,42 @@ with tab3:
         st.markdown(f"### 🟢 該分點倒貨中 (極端賣出) - 共 {len(st.session_state.t3_sell_df)} 檔")
         display_table_with_button_t3(st.session_state.t3_sell_df.sort_values(by=col_sell, ascending=False).head(999 if show_full_t3 else 10), "t3_sell")
 
-
 # ==========================================
-# 🌟 [終極修正版] 精確還原 Pine Script 的 MACD 波段極值背離邏輯
+# 🌟 [終極精確版] 完全還原 Pine Script 波段極值背離邏輯
 # ==========================================
 def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
     """
-    1. 透過 Histogram (紅綠柱) 大於或小於 0 劃分波段。
-    2. 第一波 (前一波)：價格標竿鎖定在「DIF 達到極值的那一天」的價格。
-    3. 第二波 (當前波)：價格標竿是「整個當前波段內的絕對極值」價格。
-    4. 大前提：只要 DIF 跌破零軸 (M頂) 或升破零軸 (W底)，前波記憶強制重置。
-    5. 波段結束 (轉綠或轉紅) 或圖表最末端時，進行比較並產生標記。
+    Pine 邏輯核心重點：
+    1. 【前一波比較基準】 (prior_top_close)：是 DIF(快線) 最高點「那一天」的價格。
+    2. 【當前波比較基準】 (second_top_close)：是當前紅柱波段的「絕對最高價格」。
+    3. 【DIF 收斂條件】：當前紅柱波段的最高 DIF 必須小於前一波紅柱的最高 DIF。
+    4. 【DIF 不過零軸】：在比較完成前，DIF 不可以跌破零軸(M頂) / 升破零軸(W底)，否則重置。
+    5. 【標籤位置】：標示在當前波段創下絕對高點的那一天。
     """
     markers_price = []
     markers_macd = []
 
-    # --- 追蹤 M頂背離 (DIF 必須 > 0) ---
-    m_state = 0 
-    m_prev_dif = -float('inf')
-    m_prev_price = -float('inf')
-    m_prev_dif_date = None
+    # M Divergence (頂背離) State Variables
+    highest_top = 0.0
+    highest_top_close = 0.0
+    highest_top_date = None
 
-    m_cur_dif = -float('inf')
-    m_cur_price = -float('inf')
-    m_cur_dif_date = None
-    m_cur_price_date = None
+    prior_top = 0.0
+    prior_top_close = 0.0
 
-    # --- 追蹤 W底背離 (DIF 必須 < 0) ---
-    w_state = 0
-    w_prev_dif = float('inf')
-    w_prev_price = float('inf')
-    w_prev_dif_date = None
+    second_top_close = 0.0
+    second_top_date = None
 
-    w_cur_dif = float('inf')
-    w_cur_price = float('inf')
-    w_cur_dif_date = None
-    w_cur_price_date = None
+    # W Divergence (底背離) State Variables
+    lowest_bottom = 0.0
+    lowest_bottom_close = 0.0
+    lowest_bottom_date = None
+
+    prior_bottom = 0.0
+    prior_bottom_close = 0.0
+
+    second_bottom_close = 1e9
+    second_bottom_date = None
 
     for i in range(1, len(df_res)):
         hist = df_res[hist_col].iloc[i]
@@ -739,158 +739,195 @@ def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
         low = df_res['Low'].iloc[i]
         date = df_res['Date_str'].iloc[i]
 
-        # ----------------------------------------------------
-        # 【M頂背離判定】
-        # ----------------------------------------------------
-        if dif <= 0:
-            # 條件：慢線(DIF)不能小於等於0，一旦跌破，重置所有 M 頂記憶
-            m_state = 0
-            m_prev_dif = -float('inf')
-            m_prev_price = -float('inf')
-        else:
-            if hist > 0: # 紅柱
-                if m_state == 0: 
-                    # Phase 0: 第一波紅柱 (尋找前波標竿)
-                    # 價格標竿鎖定在 DIF 創新高的那一天！
-                    if dif > m_prev_dif:
-                        m_prev_dif = dif
-                        m_prev_price = high
-                        m_prev_dif_date = date
-                elif m_state == 1:
-                    # Phase 1 -> 2: 經歷過綠柱後，再次進入紅柱 (開啟當前波)
-                    m_state = 2
-                    m_cur_dif = dif
-                    m_cur_price = high
-                    m_cur_dif_date = date
-                    m_cur_price_date = date
-                elif m_state == 2:
-                    # Phase 2: 持續在第二波(當前波)紅柱中
-                    # DIF 創新高紀錄日期
-                    if dif > m_cur_dif:
-                        m_cur_dif = dif
-                        m_cur_dif_date = date
-                    # 價格紀錄的是「整個波段的絕對最高價」
-                    if high > m_cur_price:
-                        m_cur_price = high
-                        m_cur_price_date = date
+        cross_over_hist = (hist_prev <= 0 and hist > 0)
+        cross_under_hist = (hist_prev >= 0 and hist < 0)
+        zero_cross_hist = cross_over_hist or cross_under_hist
 
-            elif hist <= 0: # 綠柱
-                if m_state == 0:
-                    # 第一波紅柱結束，轉為綠柱 (準備等待下一波紅柱)
-                    if m_prev_dif != -float('inf'):
-                        m_state = 1
-                        # 標記第一波的 MACD 極值
-                        if m_prev_dif_date:
-                            markers_macd.append({"time": m_prev_dif_date, "position": "aboveBar", "color": "#FFD600", "shape": "text", "text": f"{m_prev_dif:.2f}"})
-                elif m_state == 2:
-                    # 第二波(當前波)紅柱結束，轉為綠柱 (關門結算)
-                    if m_cur_dif_date:
-                        markers_macd.append({"time": m_cur_dif_date, "position": "aboveBar", "color": "#FFD600", "shape": "text", "text": f"{m_cur_dif:.2f}"})
+        # ==========================================
+        # 【判定 M頂背離 (Top Divergence)】
+        # ==========================================
+        highest_top_prev = highest_top
+        highest_top_close_prev = highest_top_close
+        second_top_close_prev = second_top_close
 
-                    # 條件：當前波 DIF < 前波 DIF (收斂) 且 當前波絕對最高價 >= 前波 DIF 創高日的價格
-                    if m_cur_dif < m_prev_dif and m_cur_price >= m_prev_price:
-                        lbl_type = "价同" if m_cur_price == m_prev_price else "价破"
+        # 1. 抓取當前波段的 DIF 最高點與那天的價格
+        if zero_cross_hist:
+            highest_top = 0.0
+            highest_top_close = 0.0
+        elif dif > 0 and dif > highest_top:
+            highest_top = dif
+            highest_top_close = high
+            highest_top_date = date
+
+        # Pine 補丁：剛轉紅柱時也要記錄
+        if dif > 0 and cross_over_hist:
+            highest_top = dif
+            highest_top_close = high
+            highest_top_date = date
+
+        # DIF跌破零軸，重置
+        if dif < 0:
+            highest_top = 0.0
+            highest_top_close = 0.0
+
+        # 2. 儲存前一波段的紀錄 (前一波的DIF高點、以及那天的價格)
+        if dif < 0:
+            prior_top = 0.0
+            prior_top_close = 0.0
+        elif cross_under_hist:
+            prior_top = highest_top_prev
+            prior_top_close = highest_top_close_prev
+
+        # 3. 抓取當前波段的「絕對最高價」
+        if dif < 0 or cross_under_hist:
+            second_top_close = 0.0
+        elif high > second_top_close:
+            second_top_close = high
+            second_top_date = date
+
+        # Pine 補丁：波段結束那天如果還創高，也要補捉
+        if dif > 0 and cross_under_hist and high > second_top_close_prev:
+            second_top_close = high
+            second_top_date = date
+
+        # 4. 波段結束 (紅柱轉綠柱) 時結算：是否發生背離？
+        if cross_under_hist and highest_top_prev > 0 and prior_top > 0:
+            # 標出副圖的 DIF 數值
+            if highest_top_date:
+                markers_macd.append({"time": highest_top_date, "position": "aboveBar", "color": "#FFD600", "shape": "text", "text": f"{highest_top_prev:.2f}"})
+
+            # 判斷：這波最高DIF沒過前波DIF (收斂)，但這波的絕對最高價 >= 前波DIF最高點的價格
+            if highest_top_prev < prior_top and second_top_close_prev >= prior_top_close:
+                lbl = "价同" if second_top_close_prev == prior_top_close else "价破"
+                if second_top_date:
+                    markers_price.append({
+                        "time": second_top_date, # 標在創高價格發生的那一天
+                        "position": "aboveBar",
+                        "color": "#ef5350",
+                        "shape": "arrowDown",
+                        "text": f"M{prefix}\n{lbl}\n{second_top_close_prev:.2f}"
+                    })
+
+        # -----------------------------------------------------------------
+        # 圖表最右邊「未完成的波段」(未MS) 標示
+        # -----------------------------------------------------------------
+        if i == len(df_res) - 1: 
+            if hist > 0 and highest_top > 0 and prior_top > 0:
+                if highest_top_date:
+                    markers_macd.append({"time": highest_top_date, "position": "aboveBar", "color": "#FFD600", "shape": "text", "text": f"{highest_top:.2f}"})
+                if highest_top < prior_top and second_top_close >= prior_top_close:
+                    lbl = "价同" if second_top_close == prior_top_close else "价破"
+                    if second_top_date:
                         markers_price.append({
-                            "time": m_cur_price_date, 
+                            "time": second_top_date,
                             "position": "aboveBar",
                             "color": "#ef5350",
                             "shape": "arrowDown",
-                            "text": f"M{prefix} {lbl_type} {m_prev_price:.2f}"
+                            "text": f"未M{prefix}\n{lbl}\n{second_top_close:.2f}"
                         })
 
-                    # 結算完畢，把現在這波變成「前一波」
-                    m_prev_dif = m_cur_dif
-                    m_prev_price = m_cur_price
-                    m_prev_dif_date = m_cur_dif_date
-                    
-                    # 狀態回到 1 (等待下一次紅柱)
-                    m_cur_dif = -float('inf')
-                    m_cur_price = -float('inf')
-                    m_state = 1
 
-        # ----------------------------------------------------
-        # 【W底背離判定】
-        # ----------------------------------------------------
-        if dif >= 0:
-            # 條件：慢線(DIF)不能大於等於0，一旦升破，重置所有 W 底記憶
-            w_state = 0
-            w_prev_dif = float('inf')
-            w_prev_price = float('inf')
-        else:
-            if hist < 0: # 綠柱
-                if w_state == 0: 
-                    # Phase 0: 第一波綠柱 (尋找前波標竿)
-                    # 價格標竿鎖定在 DIF 創新低的那一天！
-                    if dif < w_prev_dif:
-                        w_prev_dif = dif
-                        w_prev_price = low
-                        w_prev_dif_date = date
-                elif w_state == 1: 
-                    # Phase 1 -> 2: 經歷過紅柱後，再次進入綠柱 (開啟當前波)
-                    w_state = 2
-                    w_cur_dif = dif
-                    w_cur_price = low
-                    w_cur_dif_date = date
-                    w_cur_price_date = date
-                elif w_state == 2: 
-                    # Phase 2: 持續在第二波(當前波)綠柱中
-                    if dif < w_cur_dif:
-                        w_cur_dif = dif
-                        w_cur_dif_date = date
-                    # 價格紀錄的是「整個波段的絕對最低價」
-                    if low < w_cur_price:
-                        w_cur_price = low
-                        w_cur_price_date = date
+        # ==========================================
+        # 【判定 W底背離 (Bottom Divergence)】
+        # ==========================================
+        lowest_bottom_prev = lowest_bottom
+        lowest_bottom_close_prev = lowest_bottom_close
+        second_bottom_close_prev = second_bottom_close
 
-            elif hist >= 0: # 紅柱
-                if w_state == 0:
-                    # 第一波綠柱結束，轉為紅柱 (準備等待下一波綠柱)
-                    if w_prev_dif != float('inf'):
-                        w_state = 1
-                        if w_prev_dif_date:
-                            markers_macd.append({"time": w_prev_dif_date, "position": "belowBar", "color": "#00E676", "shape": "text", "text": f"{w_prev_dif:.2f}"})
-                elif w_state == 2:
-                    # 第二波(當前波)綠柱結束，轉為紅柱 (關門結算)
-                    if w_cur_dif_date:
-                        markers_macd.append({"time": w_cur_dif_date, "position": "belowBar", "color": "#00E676", "shape": "text", "text": f"{w_cur_dif:.2f}"})
+        # 1. 抓取當前波段的 DIF 最低點與那天的價格
+        if zero_cross_hist:
+            lowest_bottom = 0.0
+            lowest_bottom_close = 0.0
+        elif dif < 0 and dif < lowest_bottom:
+            lowest_bottom = dif
+            lowest_bottom_close = low
+            lowest_bottom_date = date
 
-                    # 條件：當前波 DIF > 前波 DIF (收斂) 且 當前波絕對最低價 <= 前波 DIF 創低日的價格
-                    if w_cur_dif > w_prev_dif and w_cur_price <= w_prev_price:
-                        lbl_type = "价同" if w_cur_price == w_prev_price else "价破"
+        if dif < 0 and cross_under_hist:
+            lowest_bottom = dif
+            lowest_bottom_close = low
+            lowest_bottom_date = date
+
+        # DIF升破零軸，重置
+        if dif > 0:
+            lowest_bottom = 0.0
+            lowest_bottom_close = 0.0
+
+        # 2. 儲存前一波段的紀錄 (前一波的DIF低點、以及那天的價格)
+        if dif > 0:
+            prior_bottom = 0.0
+            prior_bottom_close = 0.0
+        elif cross_over_hist:
+            prior_bottom = lowest_bottom_prev
+            prior_bottom_close = lowest_bottom_close_prev
+
+        # 3. 抓取當前波段的「絕對最低價」
+        if dif > 0 or cross_over_hist:
+            second_bottom_close = 1e9
+        elif low < second_bottom_close:
+            second_bottom_close = low
+            second_bottom_date = date
+
+        if dif < 0 and cross_over_hist and low < second_bottom_close_prev:
+            second_bottom_close = low
+            second_bottom_date = date
+
+        # 4. 波段結束 (綠柱轉紅柱) 時結算：是否發生背離？
+        if cross_over_hist and lowest_bottom_prev < 0 and prior_bottom < 0:
+            # 標出副圖的 DIF 數值
+            if lowest_bottom_date:
+                markers_macd.append({"time": lowest_bottom_date, "position": "belowBar", "color": "#00E676", "shape": "text", "text": f"{lowest_bottom_prev:.2f}"})
+
+            # 判斷：這波最低DIF沒破前波DIF (收斂)，但這波的絕對最低價 <= 前波DIF最低點的價格
+            if lowest_bottom_prev > prior_bottom and second_bottom_close_prev <= prior_bottom_close:
+                lbl = "价同" if second_bottom_close_prev == prior_bottom_close else "价破"
+                if second_bottom_date:
+                    markers_price.append({
+                        "time": second_bottom_date, # 標在創低價格發生的那一天
+                        "position": "belowBar",
+                        "color": "#26a69a",
+                        "shape": "arrowUp",
+                        "text": f"W{prefix}\n{lbl}\n{second_bottom_close_prev:.2f}"
+                    })
+
+        # -----------------------------------------------------------------
+        # 圖表最右邊「未完成的波段」(未WS) 標示
+        # -----------------------------------------------------------------
+        if i == len(df_res) - 1:
+            if hist < 0 and lowest_bottom < 0 and prior_bottom < 0:
+                if lowest_bottom_date:
+                    markers_macd.append({"time": lowest_bottom_date, "position": "belowBar", "color": "#00E676", "shape": "text", "text": f"{lowest_bottom:.2f}"})
+                if lowest_bottom > prior_bottom and second_bottom_close <= prior_bottom_close:
+                    lbl = "价同" if second_bottom_close == prior_bottom_close else "价破"
+                    if second_bottom_date:
                         markers_price.append({
-                            "time": w_cur_price_date, 
+                            "time": second_bottom_date,
                             "position": "belowBar",
                             "color": "#26a69a",
                             "shape": "arrowUp",
-                            "text": f"W{prefix} {lbl_type} {w_prev_price:.2f}"
+                            "text": f"未W{prefix}\n{lbl}\n{second_bottom_close:.2f}"
                         })
 
-                    w_prev_dif = w_cur_dif
-                    w_prev_price = w_cur_price
-                    w_prev_dif_date = w_cur_dif_date
+    # 去除重複標籤 (防止即時運算產生重複項目)
+    unique_price = []
+    seen_price = set()
+    for m in reversed(markers_price): 
+        key = f"{m['time']}_{m['text']}"
+        if key not in seen_price:
+            seen_price.add(key)
+            unique_price.append(m)
+    unique_price.reverse()
 
-                    w_cur_dif = float('inf')
-                    w_cur_price = float('inf')
-                    w_state = 1
+    unique_macd = []
+    seen_macd = set()
+    for m in reversed(markers_macd):
+        key = f"{m['time']}_{m['text']}"
+        if key not in seen_macd:
+            seen_macd.add(key)
+            unique_macd.append(m)
+    unique_macd.reverse()
 
-    # ----------------------------------------------------
-    # 處理圖表最後端尚未關門結算的「未M / 未W」狀態
-    # ----------------------------------------------------
-    if m_state == 2:
-        if m_cur_dif_date:
-            markers_macd.append({"time": m_cur_dif_date, "position": "aboveBar", "color": "#FFD600", "shape": "text", "text": f"{m_cur_dif:.2f}"})
-        if m_cur_dif < m_prev_dif and m_cur_price >= m_prev_price:
-            lbl_type = "价同" if m_cur_price == m_prev_price else "价破"
-            markers_price.append({"time": m_cur_price_date, "position": "aboveBar", "color": "#ef5350", "shape": "arrowDown", "text": f"未M{prefix} {lbl_type} {m_prev_price:.2f}"})
-
-    if w_state == 2:
-        if w_cur_dif_date:
-            markers_macd.append({"time": w_cur_dif_date, "position": "belowBar", "color": "#00E676", "shape": "text", "text": f"{w_cur_dif:.2f}"})
-        if w_cur_dif > w_prev_dif and w_cur_price <= w_prev_price:
-            lbl_type = "价同" if w_cur_price == w_prev_price else "价破"
-            markers_price.append({"time": w_cur_price_date, "position": "belowBar", "color": "#26a69a", "shape": "arrowUp", "text": f"未W{prefix} {lbl_type} {w_prev_price:.2f}"})
-
-    return markers_price, markers_macd
+    return unique_price, unique_macd
 
 
 def merge_kline_markers(markers):
@@ -1096,7 +1133,7 @@ with tab4:
                     df_resampled['M2_macd'] = macd2
                     df_resampled['M2_sig'] = sig2
                     
-                    # 🌟 計算背離標記點與 MACD 極值點 (短線加後綴S，長線加後綴L)
+                    # 🌟 計算所有的背離標記點與 MACD 極值點
                     markers_price_m1, markers_macd_m1 = get_pine_divergence_markers(df_resampled, 'M1_macd', 'M1_hist', 'S')
                     markers_price_m2, markers_macd_m2 = get_pine_divergence_markers(df_resampled, 'M2_macd', 'M2_hist', 'L')
                     
@@ -1228,7 +1265,7 @@ with tab4:
                             const bbDn = chart.addLineSeries({{ color: 'rgba(255, 255, 255, 0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             bbDn.setData(rawData.filter(d => d.bbd !== undefined).map(d => ({{time: d.time, value: d.bbd}})));
                             
-                            // 買賣超 (獨立座標)
+                            // 買賣超
                             const seriesVol = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'vol', lastValueVisible: false, priceLineVisible: false }});
                             seriesVol.setData(rawData.map(d => ({{time: d.time, value: d.vol, color: d.vol >= 0 ? 'rgba(239, 83, 80, 0.8)' : 'rgba(38, 166, 154, 0.8)'}})));
                             chart.priceScale('vol').applyOptions({{ scaleMargins: {{ top: 0.58, bottom: 0.28 }}, visible: false }});
