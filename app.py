@@ -997,38 +997,32 @@ def merge_kline_markers(markers):
 with tab4:
     if st.session_state.auto_draw:
         st.success("✅ 參數已帶入！請直接查看下方圖表。")
-
-    # ── 第一排：股票代號 + 繪圖按鈕 ──
-    c_sid, c_draw = st.columns([3, 1])
-    with c_sid:
+        
+    col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns([1, 1.5, 1, 1, 1])
+    
+    with col_t1:
         t4_sid = st.text_input("股票代號", value=st.session_state.get('t4_target_sid', '6488'))
-    with c_draw:
-        st.write("")
-        draw_btn = st.button("🎨 繪圖", use_container_width=True)
-
-    # ── 第二排：搜尋分點（獨佔一行，手機友善） ──
-    all_br_names = sorted(list(BROKER_MAP.keys()))
-    t4_br_val = st.session_state.get('t4_target_br', '兆豐-忠孝')
-    idx = all_br_names.index(t4_br_val) if t4_br_val in all_br_names else 0
-    t4_br_name = st.selectbox("搜尋分點", all_br_names, index=idx)
-
-    # ── 第三排：週期 + K棒數 ──
-    c_period, c_days = st.columns([1, 1])
-    with c_period:
+    with col_t2:
+        all_br_names = sorted(list(BROKER_MAP.keys()))
+        t4_br_val = st.session_state.get('t4_target_br', '兆豐-忠孝')
+        idx = all_br_names.index(t4_br_val) if t4_br_val in all_br_names else 0
+        t4_br_name = st.selectbox("搜尋分點", all_br_names, index=idx)
+    with col_t3: 
         t4_period = st.radio("週期", ["日", "週", "月"], horizontal=True)
-    with c_days:
+    with col_t4: 
         t4_days = st.number_input("K棒數", value=200, min_value=10, max_value=1000)
-
-    # ── 第四排：存入清單 + 水平線 ──
-    c_fav, c_hval, c_hadd, c_hclr = st.columns([1, 1, 1, 1])
-    with c_fav:
-        st.write("")
-        fav_btn = st.button("❤️ 存入清單", use_container_width=True)
-    with c_hval:
+    with col_t5:
+        st.write("") 
+        draw_btn = st.button("🎨 繪圖", width="stretch")
+        
+    col_x1, col_x2_1, col_x2_2, col_x3 = st.columns([1.5, 2, 1, 1.5])
+    with col_x1:
+        fav_btn = st.button("❤️ 存入清單", width="stretch")
+    with col_x2_1:
         hline_val = st.number_input("📏 水平線價格", value=0.0, step=1.0, key="hline_val_input")
-    with c_hadd:
+    with col_x2_2:
         st.write("")
-        if st.button("➕ 加入畫線", use_container_width=True):
+        if st.button("➕ 加入畫線", width="stretch"):
             if hline_val > 0 and hline_val not in st.session_state.custom_hlines:
                 st.session_state.custom_hlines.append(hline_val)
             st.session_state.t4_target_sid = t4_sid
@@ -1036,15 +1030,98 @@ with tab4:
             st.session_state.auto_draw = True
             st.session_state.chart_render_key += 1
             st.rerun()
-    with c_hclr:
+    with col_x3:
         st.write("")
-        if st.button("🗑️ 清除畫線", use_container_width=True):
+        if st.button("🗑️ 清除所有畫線", width="stretch"):
             st.session_state.custom_hlines = []
             st.session_state.t4_target_sid = t4_sid
             st.session_state.t4_target_br = t4_br_name
             st.session_state.auto_draw = True
             st.session_state.chart_render_key += 1
             st.rerun()
+    
+    t4_sid_clean = t4_sid.strip().upper()
+
+    # 🌟 GSheets: 新增清單
+    if fav_btn:
+        entry = {"股票代號": t4_sid_clean, "追蹤分點": t4_br_name}
+        if entry not in st.session_state.watchlist:
+            st.session_state.watchlist.append(entry)
+            
+            # 寫入雲端並接收狀態
+            success, msg = save_gsheet_watchlist(current_user, st.session_state.watchlist)
+            if success:
+                st.success(f"✅ 已存入【{current_user}】專屬雲端清單！")
+            else:
+                st.warning(f"⚠️ 雲端同步失敗！(錯誤原因: {msg})，目前僅存於本次暫存區。")
+        else:
+            st.warning("⚠️ 此組合已在清單中。")
+
+    with st.expander("⚙️ 進階指標參數設定", expanded=False):
+        sc1, sc2, sc3 = st.columns(3)
+        with sc1: 
+            st.markdown("**布林通道**")
+            c_bb1, c_bb2 = st.columns(2)
+            with c_bb1: bb_w = st.number_input("週期", value=52)
+            with c_bb2: bb_std = st.number_input("標準差", value=2.0, step=0.1)
+        with sc2: 
+            st.markdown("**短線 MACD**")
+            c_m11, c_m12, c_m13 = st.columns(3)
+            with c_m11: macd1_f = st.number_input("快", value=12, key="m1f")
+            with c_m12: macd1_s = st.number_input("慢", value=26, key="m1s")
+            with c_m13: macd1_sig = st.number_input("訊號", value=9, key="m1sig")
+        with sc3: 
+            st.markdown("**長線 MACD**")
+            c_m21, c_m22, c_m23 = st.columns(3)
+            with c_m21: macd2_f = st.number_input("快", value=26, key="m2f")
+            with c_m22: macd2_s = st.number_input("慢", value=52, key="m2s")
+            with c_m23: macd2_sig = st.number_input("訊號", value=18, key="m2sig")
+
+    if st.session_state.watchlist:
+        with st.expander(f"⭐ 【{current_user}】的專屬主力清單", expanded=True):
+            
+            if 'wl_refresh_key' not in st.session_state:
+                st.session_state.wl_refresh_key = 0
+                
+            wl_df = pd.DataFrame(st.session_state.watchlist)
+            wl_df.insert(0, '載入', False)
+            wl_df['刪除'] = False
+            wl_config = {"載入": st.column_config.CheckboxColumn("載入繪圖"), "刪除": st.column_config.CheckboxColumn("刪除")}
+            
+            editor_key = f"wl_editor_{st.session_state.wl_refresh_key}"
+            st.data_editor(wl_df, hide_index=True, column_config=wl_config, width="stretch", key=editor_key)
+            
+            if editor_key in st.session_state:
+                edits = st.session_state[editor_key].get('edited_rows', {})
+                action_taken = False
+                
+                for row_idx, changes in edits.items():
+                    # 處理「載入」點擊
+                    if changes.get('載入', False) == True:
+                        st.session_state.t4_target_sid = wl_df.iloc[row_idx]['股票代號']
+                        st.session_state.t4_target_br = wl_df.iloc[row_idx]['追蹤分點']
+                        st.session_state.auto_draw = True
+                        st.session_state.chart_render_key += 1
+                        action_taken = True
+                        break 
+                        
+                    # 處理「刪除」點擊
+                    if changes.get('刪除', False) == True:
+                        del_sid = wl_df.iloc[row_idx]['股票代號']
+                        del_br = wl_df.iloc[row_idx]['追蹤分點']
+                        st.session_state.watchlist = [item for item in st.session_state.watchlist if not (item['股票代號'] == del_sid and item['追蹤分點'] == del_br)]
+                        
+                        success, msg = save_gsheet_watchlist(current_user, st.session_state.watchlist)
+                        if not success:
+                            st.error(f"雲端刪除同步失敗: {msg}")
+                        action_taken = True
+                        break
+
+                if action_taken:
+                    st.session_state.wl_refresh_key += 1
+                    st.rerun()
+
+    st.markdown("---")
     enable_click_line = st.checkbox("👆 啟用點擊 K 棒自動畫線 (防止手機滑動時誤觸)", value=False)
 
     # 執行繪圖
