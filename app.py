@@ -752,7 +752,7 @@ def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
                 markers_macd.append({"time": prev_top_date, "position": "aboveBar", "color": "#FFD600", "shape": "text", "text": f"{prev_top_dif:.2f}"})
             if (cur_top_dif > 0 and prev_top_dif > 0 and cur_top_dif < prev_top_dif and cur_wave_high >= prev_top_close and prev_top_date is not None):
                 lbl = "价同" if cur_wave_high == prev_top_close else "价破"
-                markers_price.append({"time": prev_top_date, "position": "aboveBar", "color": "#ef5350", "shape": "arrowDown", "text": f"M{prefix}\n{lbl}\n{prev_top_close:.2f}"})
+                markers_price.append({"time": prev_top_date, "position": "aboveBar", "color": "#ef5350", "shape": "arrowDown", "text": f"M{prefix}\n{lbl}\n{prev_top_close:.2f}", "price": prev_top_close})
             if cur_top_dif > 0:
                 prev_top_dif = cur_top_dif; prev_top_date = cur_top_date; prev_top_close = cur_top_close
             cur_top_dif = 0.0; cur_top_date = None; cur_top_close = 0.0; cur_wave_high = 0.0
@@ -781,7 +781,7 @@ def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
                 markers_macd.append({"time": prev_bot_date, "position": "belowBar", "color": "#00E676", "shape": "text", "text": f"{prev_bot_dif:.2f}"})
             if (cur_bot_dif < 0 and prev_bot_dif < 0 and cur_bot_dif > prev_bot_dif and cur_wave_low <= prev_bot_close and prev_bot_date is not None):
                 lbl = "价同" if cur_wave_low == prev_bot_close else "价破"
-                markers_price.append({"time": prev_bot_date, "position": "belowBar", "color": "#26a69a", "shape": "arrowUp", "text": f"W{prefix}\n{lbl}\n{prev_bot_close:.2f}"})
+                markers_price.append({"time": prev_bot_date, "position": "belowBar", "color": "#26a69a", "shape": "arrowUp", "text": f"W{prefix}\n{lbl}\n{prev_bot_close:.2f}", "price": prev_bot_close})
             if cur_bot_dif < 0:
                 prev_bot_dif = cur_bot_dif; prev_bot_date = cur_bot_date; prev_bot_close = cur_bot_close
             cur_bot_dif = 0.0; cur_bot_date = None; cur_bot_close = 0.0; cur_wave_low = 1e9
@@ -798,13 +798,13 @@ def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
                     markers_macd.append({"time": prev_top_date, "position": "aboveBar", "color": "#FFD600", "shape": "text", "text": f"{prev_top_dif:.2f}"})
                 if cur_top_dif < prev_top_dif and cur_wave_high >= prev_top_close and prev_top_date is not None:
                     lbl = "价同" if cur_wave_high == prev_top_close else "价破"
-                    markers_price.append({"time": prev_top_date, "position": "aboveBar", "color": "#ef5350", "shape": "arrowDown", "text": f"未M{prefix}\n{lbl}\n{prev_top_close:.2f}"})
+                    markers_price.append({"time": prev_top_date, "position": "aboveBar", "color": "#ef5350", "shape": "arrowDown", "text": f"未M{prefix}\n{lbl}\n{prev_top_close:.2f}", "price": prev_top_close})
             if hist < 0 and cur_bot_dif < 0 and prev_bot_dif < 0:
                 if prev_bot_date is not None:
                     markers_macd.append({"time": prev_bot_date, "position": "belowBar", "color": "#00E676", "shape": "text", "text": f"{prev_bot_dif:.2f}"})
                 if cur_bot_dif > prev_bot_dif and cur_wave_low <= prev_bot_close and prev_bot_date is not None:
                     lbl = "价同" if cur_wave_low == prev_bot_close else "价破"
-                    markers_price.append({"time": prev_bot_date, "position": "belowBar", "color": "#26a69a", "shape": "arrowUp", "text": f"未W{prefix}\n{lbl}\n{prev_bot_close:.2f}"})
+                    markers_price.append({"time": prev_bot_date, "position": "belowBar", "color": "#26a69a", "shape": "arrowUp", "text": f"未W{prefix}\n{lbl}\n{prev_bot_close:.2f}", "price": prev_bot_close})
 
     def dedup(lst):
         seen, out = set(), []
@@ -1143,6 +1143,28 @@ with tab4:
                             const seriesK = chart.addCandlestickSeries({{ upColor: '#ef5350', downColor: '#26a69a', borderVisible: false, wickUpColor: '#ef5350', wickDownColor: '#26a69a' }});
                             seriesK.setData(rawData.map(d => ({{time: d.time, open: d.open, high: d.high, low: d.low, close: d.close}})));
                             seriesK.setMarkers(markersPrice);
+
+                            // 為每個背離標籤畫水平延伸線到最右邊（不顯示右側價格標籤）
+                            const lastDataTime = rawData[rawData.length - 1].time;
+                            markersPrice.forEach(m => {{
+                                if (m.price === undefined) return;
+                                const lineColor = m.color === '#ef5350'
+                                    ? 'rgba(239, 83, 80, 0.5)'
+                                    : 'rgba(38, 166, 154, 0.5)';
+                                const extLine = chart.addLineSeries({{
+                                    color: lineColor,
+                                    lineWidth: 1,
+                                    lineStyle: 1,          // 虛線
+                                    lastValueVisible: false, // 右側不顯示標籤
+                                    priceLineVisible: false,
+                                    crosshairMarkerVisible: false,
+                                }});
+                                if (m.time === lastDataTime) {{
+                                    extLine.setData([ {{ time: m.time, value: m.price }} ]);
+                                }} else {{
+                                    extLine.setData([ {{ time: m.time, value: m.price }}, {{ time: lastDataTime, value: m.price }} ]);
+                                }}
+                            }});
                             
                             const bbMid = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             bbMid.setData(rawData.filter(d => d.bbm !== undefined).map(d => ({{time: d.time, value: d.bbm}})));
@@ -1178,7 +1200,6 @@ with tab4:
                             }});
 
                             // 重繪時還原上次點擊畫的支撐壓力線
-                            const lastDataTime = rawData[rawData.length - 1].time;
                             clickLines.forEach(line => {{
                                 const raySeries = chart.addLineSeries({{
                                     color: line.color, lineWidth: 2, lineStyle: 2,
