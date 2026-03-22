@@ -1052,7 +1052,8 @@ with tab4:
                         <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
                         <style>
                             body {{ margin: 0; padding: 0; background-color: #131722; overflow: hidden; font-family: "Microsoft JhengHei", sans-serif; }}
-                            #wrapper {{ position: relative; width: 100vw; height: 95vh; }}
+                            /* 手機右側留出 12px 讓 Streamlit 滾動條不與圖表價格軸重疊 */
+                            #wrapper {{ position: relative; width: calc(100vw - 12px); height: 95vh; }}
                             #chart {{ width: 100%; height: 100%; }}
                             .tv-legend {{
                                 position: absolute; left: 12px; top: 12px; z-index: 999; font-size: 13px; color: #d1d4dc; 
@@ -1126,7 +1127,7 @@ with tab4:
                             bbDn.setData(rawData.filter(d => d.bbd !== undefined).map(d => ({{time: d.time, value: d.bbd}})));
                             
                             const seriesVol = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'vol', lastValueVisible: false, priceLineVisible: false }});
-                            seriesVol.setData(rawData.map(d => ({{time: d.time, value: d.vol, color: d.vol >= 0 ? 'rgba(239, 83, 80, 0.8)' : 'rgba(38, 166, 154, 0.8)'}})));
+                            seriesVol.setData(rawData.map(d => ({{time: d.time, value: d.vol, color: d.vol > 0 ? 'rgba(239, 83, 80, 0.8)' : d.vol < 0 ? 'rgba(38, 166, 154, 0.8)' : 'rgba(120, 120, 120, 0.5)'}})));
                             chart.priceScale('vol').applyOptions({{ scaleMargins: {{ top: 0.58, bottom: 0.28 }}, visible: false }});
                             
                             const seriesH1 = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'm1', lastValueVisible: false, priceLineVisible: false }});
