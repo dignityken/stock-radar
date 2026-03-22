@@ -702,8 +702,8 @@ def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
     """
     依照使用者明確定義的 Pine 邏輯重寫：
     1. 以 Histogram (紅綠柱) 是否大於 0 來劃分「波段」。
-    2. 若 DIF(慢線) 掉下零軸，則 M頂背離 紀錄強制重置；反之若 DIF 升上零軸，則 W底背離 紀錄重置。
-    3. 在同一個合法區間內，比較連續兩波 Histogram 波段的極值與價格，判定價破/價同。
+    2. 若 DIF(慢線) 掉下/升上零軸，則背離比較紀錄強制重置。
+    3. 在波段結算當下，對比上一個同向波段的極值與價格，判定價破/價同。
     """
     markers_price = []
     markers_macd = []
@@ -715,7 +715,7 @@ def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
     m_cur_price = -float('inf')
     m_cur_dif_date = None
     m_cur_price_date = None
-    m_in_wave = False # 是否在紅柱波段中
+    m_in_wave = False 
 
     # 追蹤 W底背離 (DIF < 0 區間有效)
     w_prev_dif = None
@@ -724,7 +724,7 @@ def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
     w_cur_price = float('inf')
     w_cur_dif_date = None
     w_cur_price_date = None
-    w_in_wave = False # 是否在綠柱波段中
+    w_in_wave = False 
 
     for i in range(1, len(df_res)):
         hist = df_res[hist_col].iloc[i]
@@ -735,24 +735,21 @@ def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
 
         # ----------------------------------------------------
         # 【判定 M頂背離 (Top Divergence)】
-        # 條件: DIF 必須一直 > 0，若跌破 0 則前一波記憶重置
+        # 條件: DIF 必須 > 0，若跌破 0 則前一波記憶重置
         # ----------------------------------------------------
         if dif <= 0:
             m_prev_dif = None
             m_prev_price = None
             m_in_wave = False
         else:
-            # 進入或持續在紅柱波段
             if hist > 0:
                 if not m_in_wave:
-                    # 剛從綠柱轉紅柱，開啟新波段
                     m_in_wave = True
                     m_cur_dif = dif
                     m_cur_price = high
                     m_cur_dif_date = date
                     m_cur_price_date = date
                 else:
-                    # 持續在紅柱中，更新極值
                     if dif > m_cur_dif:
                         m_cur_dif = dif
                         m_cur_dif_date = date
@@ -760,51 +757,43 @@ def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
                         m_cur_price = high
                         m_cur_price_date = date
 
-            # 當紅柱轉綠柱，代表上一個紅柱波段結束，準備結算
             elif hist <= 0 and m_in_wave:
                 m_in_wave = False
-                
-                # 標記剛剛結束的這個紅柱波段的 DIF 最大值
                 if m_cur_dif_date:
                     markers_macd.append({"time": m_cur_dif_date, "position": "aboveBar", "color": "#FFD600", "shape": "text", "text": f"{m_cur_dif:.2f}"})
 
-                # 若有前一個波段的紀錄，進行比較
                 if m_prev_dif is not None:
-                    # 條件：當前 DIF 沒過前高(收斂) AND 當前價格過前高(價破)或平前高(價同)
+                    # 條件：當前 DIF 未過前高(收斂) AND 當前價格過前高(價破)或平前高(價同)
                     if m_cur_dif < m_prev_dif and m_cur_price >= m_prev_price:
                         lbl_type = "价同" if m_cur_price == m_prev_price else "价破"
                         markers_price.append({
-                            "time": m_cur_price_date, # 標在創高價格發生的那一天
+                            "time": m_cur_price_date, 
                             "position": "aboveBar",
                             "color": "#ef5350",
                             "shape": "arrowDown",
-                            "text": f"M{prefix}\n{lbl_type}\n{m_cur_price:.2f}"
+                            "text": f"M{prefix} {lbl_type} {m_prev_price:.1f}"
                         })
 
-                # 將剛剛結算的波段，存為「前一波」
                 m_prev_dif = m_cur_dif
                 m_prev_price = m_cur_price
 
         # ----------------------------------------------------
         # 【判定 W底背離 (Bottom Divergence)】
-        # 條件: DIF 必須一直 < 0，若升破 0 則前一波記憶重置
+        # 條件: DIF 必須 < 0，若升破 0 則前一波記憶重置
         # ----------------------------------------------------
         if dif >= 0:
             w_prev_dif = None
             w_prev_price = None
             w_in_wave = False
         else:
-            # 進入或持續在綠柱波段
             if hist < 0:
                 if not w_in_wave:
-                    # 剛從紅柱轉綠柱，開啟新波段
                     w_in_wave = True
                     w_cur_dif = dif
                     w_cur_price = low
                     w_cur_dif_date = date
                     w_cur_price_date = date
                 else:
-                    # 持續在綠柱中，更新極值
                     if dif < w_cur_dif:
                         w_cur_dif = dif
                         w_cur_dif_date = date
@@ -812,37 +801,40 @@ def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
                         w_cur_price = low
                         w_cur_price_date = date
 
-            # 當綠柱轉紅柱，代表上一個綠柱波段結束，準備結算
             elif hist >= 0 and w_in_wave:
                 w_in_wave = False
-                
-                # 標記剛剛結束的這個綠柱波段的 DIF 最小值
                 if w_cur_dif_date:
                     markers_macd.append({"time": w_cur_dif_date, "position": "belowBar", "color": "#00E676", "shape": "text", "text": f"{w_cur_dif:.2f}"})
 
-                # 若有前一個波段的紀錄，進行比較
                 if w_prev_dif is not None:
-                    # 條件：當前 DIF 沒破前低(收斂) AND 當前價格破前低(價破)或平前低(價同)
+                    # 條件：當前 DIF 未破前低(收斂) AND 當前價格破前低(價破)或平前低(價同)
                     if w_cur_dif > w_prev_dif and w_cur_price <= w_prev_price:
                         lbl_type = "价同" if w_cur_price == w_prev_price else "价破"
                         markers_price.append({
-                            "time": w_cur_price_date, # 標在創低價格發生的那一天
+                            "time": w_cur_price_date, 
                             "position": "belowBar",
                             "color": "#26a69a",
                             "shape": "arrowUp",
-                            "text": f"W{prefix}\n{lbl_type}\n{w_cur_price:.2f}"
+                            "text": f"W{prefix} {lbl_type} {w_prev_price:.1f}"
                         })
 
-                # 將剛剛結算的波段，存為「前一波」
                 w_prev_dif = w_cur_dif
                 w_prev_price = w_cur_price
 
     # -- 處理目前尚未閉合的波段 --
-    # 若走到圖表最右邊波段還沒走完，依然標出目前的 MACD 極值
     if m_in_wave and m_cur_dif_date:
         markers_macd.append({"time": m_cur_dif_date, "position": "aboveBar", "color": "#FFD600", "shape": "text", "text": f"{m_cur_dif:.2f}"})
+        if m_prev_dif is not None:
+            if m_cur_dif < m_prev_dif and m_cur_price >= m_prev_price:
+                lbl_type = "价同" if m_cur_price == m_prev_price else "价破"
+                markers_price.append({"time": m_cur_price_date, "position": "aboveBar", "color": "#ef5350", "shape": "arrowDown", "text": f"未M{prefix} {lbl_type} {m_prev_price:.1f}"})
+                
     if w_in_wave and w_cur_dif_date:
         markers_macd.append({"time": w_cur_dif_date, "position": "belowBar", "color": "#00E676", "shape": "text", "text": f"{w_cur_dif:.2f}"})
+        if w_prev_dif is not None:
+            if w_cur_dif > w_prev_dif and w_cur_price <= w_prev_price:
+                lbl_type = "价同" if w_cur_price == w_prev_price else "价破"
+                markers_price.append({"time": w_cur_price_date, "position": "belowBar", "color": "#26a69a", "shape": "arrowUp", "text": f"未W{prefix} {lbl_type} {w_prev_price:.1f}"})
 
     return markers_price, markers_macd
 
@@ -855,7 +847,7 @@ def merge_kline_markers(markers):
         if t not in merged:
             merged[t] = m.copy()
         else:
-            merged[t]['text'] += f"\n---\n{m['text']}" # 使用虛線分隔不同週期的背離
+            merged[t]['text'] += f" | {m['text']}" 
     return sorted(list(merged.values()), key=lambda x: x['time'])
 
 
@@ -996,7 +988,6 @@ with tab4:
         st.session_state.show_chart = True
         st.session_state.chart_render_key += 1
         
-        # 繪圖時同步回寫目前輸入框的狀態，確保下次重整時不會跑掉
         st.session_state.t4_target_sid = t4_sid
         st.session_state.t4_target_br = t4_br_name
         
@@ -1005,7 +996,6 @@ with tab4:
         st.session_state.drawn_period = t4_period
         st.session_state.drawn_days = t4_days
 
-    # 只要曾經畫過，或按過繪圖按鈕，便繼續顯示最後一次成功繪製的圖表
     if st.session_state.get('show_chart', False):
         drawn_sid_clean = st.session_state.drawn_sid.strip().upper()
         drawn_br_name = st.session_state.drawn_br_name
@@ -1044,7 +1034,6 @@ with tab4:
                     macd1, sig1, hist1 = calculate_macd(df_resampled, int(macd1_f), int(macd1_s), int(macd1_sig))
                     macd2, sig2, hist2 = calculate_macd(df_resampled, int(macd2_f), int(macd2_s), int(macd2_sig))
                     
-                    # 🌟 將 MACD 資料先塞回大表，以便傳入波段極值運算函式
                     df_resampled['M1_hist'] = hist1
                     df_resampled['M1_macd'] = macd1
                     df_resampled['M1_sig'] = sig1
@@ -1057,14 +1046,13 @@ with tab4:
                     markers_price_m1, markers_macd_m1 = get_pine_divergence_markers(df_resampled, 'M1_macd', 'M1_hist', 'S')
                     markers_price_m2, markers_macd_m2 = get_pine_divergence_markers(df_resampled, 'M2_macd', 'M2_hist', 'L')
                     
-                    # 合併 K 線標籤 (防重疊)
+                    # 合併同日的標籤 (防重疊)
                     all_markers_price = merge_kline_markers(markers_price_m1 + markers_price_m2)
                     
-                    # 裁切畫面上要顯示的天數
                     df_plot = df_resampled.tail(int(drawn_days)).copy()
                     plot_valid_dates = set(df_plot['Date_str'].tolist())
                     
-                    # 🌟 過濾掉不在顯示範圍內的標籤，並強制依時間排序(防 JS 報錯)
+                    # 過濾掉不在顯示範圍內的標籤
                     final_markers_price = sorted([m for m in all_markers_price if m['time'] in plot_valid_dates], key=lambda x: x['time'])
                     final_markers_macd_m1 = sorted([m for m in markers_macd_m1 if m['time'] in plot_valid_dates], key=lambda x: x['time'])
                     final_markers_macd_m2 = sorted([m for m in markers_macd_m2 if m['time'] in plot_valid_dates], key=lambda x: x['time'])
@@ -1138,7 +1126,6 @@ with tab4:
                             const rawData = {json.dumps(all_data)};
                             const hlines = {hlines_js_array};
                             
-                            // 🌟 接收長短線專屬標記陣列
                             const markersPrice = {json.dumps(final_markers_price)};
                             const markersMacd1 = {json.dumps(final_markers_macd_m1)};
                             const markersMacd2 = {json.dumps(final_markers_macd_m2)};
@@ -1179,7 +1166,6 @@ with tab4:
                             const seriesK = chart.addCandlestickSeries({{ upColor: '#ef5350', downColor: '#26a69a', borderVisible: false, wickUpColor: '#ef5350', wickDownColor: '#26a69a' }});
                             seriesK.setData(rawData.map(d => ({{time: d.time, open: d.open, high: d.high, low: d.low, close: d.close}})));
                             
-                            // 🌟 套用 M門 / W門 (價破/價同) 標記到主圖 K 線上
                             seriesK.setMarkers(markersPrice);
                             
                             // BB
@@ -1190,7 +1176,7 @@ with tab4:
                             const bbDn = chart.addLineSeries({{ color: 'rgba(255, 255, 255, 0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             bbDn.setData(rawData.filter(d => d.bbd !== undefined).map(d => ({{time: d.time, value: d.bbd}})));
                             
-                            // 買賣超 (獨立座標)
+                            // 買賣超
                             const seriesVol = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'vol', lastValueVisible: false, priceLineVisible: false }});
                             seriesVol.setData(rawData.map(d => ({{time: d.time, value: d.vol, color: d.vol >= 0 ? 'rgba(239, 83, 80, 0.8)' : 'rgba(38, 166, 154, 0.8)'}})));
                             chart.priceScale('vol').applyOptions({{ scaleMargins: {{ top: 0.58, bottom: 0.28 }}, visible: false }});
@@ -1201,7 +1187,6 @@ with tab4:
                             const seriesM1 = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, priceScaleId: 'm1', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             seriesM1.setData(rawData.filter(d => d.m1 !== undefined).map(d => ({{time: d.time, value: d.m1}})));
                             
-                            // 🌟 套用短線 MACD 極值標籤
                             seriesM1.setMarkers(markersMacd1);
                             
                             const seriesS1 = chart.addLineSeries({{ color: '#00E676', lineWidth: 1, priceScaleId: 'm1', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
@@ -1214,14 +1199,12 @@ with tab4:
                             const seriesM2 = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, priceScaleId: 'm2', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             seriesM2.setData(rawData.filter(d => d.m2 !== undefined).map(d => ({{time: d.time, value: d.m2}})));
                             
-                            // 🌟 套用長線 MACD 極值標籤
                             seriesM2.setMarkers(markersMacd2);
                             
                             const seriesS2 = chart.addLineSeries({{ color: '#00E676', lineWidth: 1, priceScaleId: 'm2', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
                             seriesS2.setData(rawData.filter(d => d.s2 !== undefined).map(d => ({{time: d.time, value: d.s2}})));
                             chart.priceScale('m2').applyOptions({{ scaleMargins: {{ top: 0.85, bottom: 0.0 }}, visible: false }});
 
-                            // Streamlit 介面輸入的水平線
                             hlines.forEach(val => {{
                                 seriesK.createPriceLine({{
                                     price: val, color: '#2962FF', lineWidth: 2, lineStyle: 2, 
