@@ -598,7 +598,7 @@ with tab3:
     with c5: t3_u = st.radio("統計單位", ["張數", "金額"], horizontal=True, key="t3_unit")
 
     c6, c7, c8 = st.columns([1.5, 1, 1])
-    with c6: t3_mode = st.radio("篩選條件", ["嚴格模式", "濾網模式"], index=1, horizontal=True, key="t3_mode")
+    with c6: t3_mode = st.radio("篩選條件", ["嚴格模式 (只買不賣)", "濾網模式 (自訂佔比)"], index=1, horizontal=True, key="t3_mode")
     with c7: t3_p = st.number_input("佔比 >= (%)", 0.0, 100.0, 95.0, step=1.0, key="t3_pct")
     with c8: st.write(""); show_full_t3 = st.checkbox("顯示完整清單", value=False, key="t3_full")
 
@@ -918,252 +918,222 @@ with tab4:
 
                     hlines_js_array = json.dumps(st.session_state.custom_hlines)
 
-                   try:
-            html_code = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <style>
-                    body {{ margin: 0; padding: 0; background-color: #131722; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }}
-                    #wrapper {{ position: relative; width: 100vw; height: 100vh; }}
-                    #chart {{ width: 100%; height: 100%; }}
-                    .tv-legend {{
-                        position: absolute; left: 12px; top: 12px; z-index: 999; font-size: 13px; color: #d1d4dc; 
-                        pointer-events: none; background: rgba(19, 23, 34, 0.85); padding: 8px 12px; 
-                        border-radius: 6px; border: 1px solid #363c4e; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-                    }}
-                    .lg-title {{ color: #2962FF; font-weight: bold; font-size: 15px; margin-bottom: 6px; border-bottom: 1px solid #444; padding-bottom: 4px; }}
-                    .lg-row {{ display: flex; justify-content: space-between; margin-bottom: 2px; width: 160px; }}
-                    .lg-label {{ color: #a0a3ab; }}
-                    .lg-vol {{ margin-top: 6px; padding-top: 6px; border-top: 1px dashed #555; font-size: 15px; display: flex; justify-content: space-between; font-weight: bold; }}
-                    .lg-macd {{ margin-top: 6px; font-size: 12px; color: #8a8d9d; line-height: 1.4; }}
-                    
-                    /* 手機版專屬畫線按鈕 */
-                    #mobileDrawBtn {{
-                        position: absolute; right: 12px; top: 12px; z-index: 1000;
-                        background-color: #ef5350; color: white; border: none;
-                        padding: 10px 16px; font-size: 14px; font-weight: bold;
-                        border-radius: 8px; cursor: pointer; display: none;
-                        box-shadow: 0 4px 10px rgba(0,0,0,0.5);
-                    }}
-                    #mobileDrawBtn:active {{ background-color: #c62828; }}
-                </style>
-            </head>
-            <body>
-                <div id="wrapper">
-                    <div id="chart"></div>
-                    <div id="legend" class="tv-legend">將滑鼠(或手指)移至 K 線上查看數據</div>
-                    <!-- 懸浮畫線按鈕 -->
-                    <button id="mobileDrawBtn">✏️ 畫線於此</button>
-                </div>
-                
-                <!-- 引入 Lightweight Charts 核心庫 -->
-                <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
-                
-                <script>
-                    const rawData = {json.dumps(all_data)};
-                    const hlines = {hlines_js_array};
-                    const enableClickLine = {'true' if enable_click_line else 'false'};
-                    
-                    const layoutOptions = {{ 
-                        layout: {{ backgroundColor: '#131722', textColor: '#d1d4dc' }},
-                        watermark: {{
-                            color: 'rgba(255, 255, 255, 0.08)',
-                            visible: true,
-                            text: '{drawn_sid_clean} {stock_name}',
-                            fontSize: 80,
-                            horzAlign: 'center',
-                            vertAlign: 'center',
-                        }},
-                        grid: {{ vertLines: {{ color: '#242733' }}, horzLines: {{ color: '#242733' }} }}, 
-                        crosshair: {{ mode: LightweightCharts.CrosshairMode.Normal }},
-                        localization: {{
-                            timeFormatter: time => {{
-                                if (typeof time === 'object' && time.year) return time.year + '-' + String(time.month).padStart(2, '0') + '-' + String(time.day).padStart(2, '0');
-                                return time;
+                    html_code = f"""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+                        <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
+                        <style>
+                            body {{ margin: 0; padding: 0; background-color: #131722; overflow: hidden; font-family: "Microsoft JhengHei", sans-serif; }}
+                            #wrapper {{ position: relative; width: 100vw; height: 95vh; }}
+                            #chart {{ width: 100%; height: 100%; }}
+                            
+                            .tv-legend {{
+                                position: absolute; left: 12px; top: 12px; z-index: 999; font-size: 13px; color: #d1d4dc; 
+                                pointer-events: none; background: rgba(19, 23, 34, 0.85); padding: 8px 12px; 
+                                border-radius: 6px; border: 1px solid #363c4e; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
                             }}
-                        }},
-                        timeScale: {{
-                            tickMarkFormatter: (time) => {{
-                                if (typeof time === 'object' && time.year) return time.year + '-' + String(time.month).padStart(2, '0') + '-' + String(time.day).padStart(2, '0');
-                                return time;
-                            }}
-                        }}
-                    }};
-                    
-                    const chart = LightweightCharts.createChart(document.getElementById('chart'), layoutOptions);
-                    
-                    chart.priceScale('right').applyOptions({{ scaleMargins: {{ top: 0.02, bottom: 0.45 }} }});
+                            .lg-title {{ color: #2962FF; font-weight: bold; font-size: 15px; margin-bottom: 6px; border-bottom: 1px solid #444; padding-bottom: 4px; }}
+                            .lg-row {{ display: flex; justify-content: space-between; margin-bottom: 2px; width: 160px; }}
+                            .lg-label {{ color: #a0a3ab; }}
+                            .lg-vol {{ margin-top: 6px; padding-top: 6px; border-top: 1px dashed #555; font-size: 15px; display: flex; justify-content: space-between; font-weight: bold; }}
+                            .lg-macd {{ margin-top: 6px; font-size: 12px; color: #8a8d9d; line-height: 1.4; }}
+                        </style>
+                    </head>
+                    <body>
+                        <div id="wrapper">
+                            <div id="chart"></div>
+                            <div id="legend" class="tv-legend">將滑鼠移至 K 線上查看數據</div>
+                        </div>
+                        <script>
+                            const rawData = {json.dumps(all_data)};
+                            const hlines = {hlines_js_array};
+                            
+                            const layoutOptions = {{ 
+                                layout: {{ backgroundColor: '#131722', textColor: '#d1d4dc' }},
+                                watermark: {{
+                                    color: 'rgba(255, 255, 255, 0.08)',
+                                    visible: true,
+                                    text: '{drawn_sid_clean} {stock_name}',
+                                    fontSize: 80,
+                                    horzAlign: 'center',
+                                    vertAlign: 'center',
+                                }},
+                                grid: {{ vertLines: {{ color: '#242733' }}, horzLines: {{ color: '#242733' }} }}, 
+                                crosshair: {{ mode: LightweightCharts.CrosshairMode.Normal }},
+                                localization: {{
+                                    timeFormatter: time => {{
+                                        if (typeof time === 'object' && time.year) return time.year + '-' + String(time.month).padStart(2, '0') + '-' + String(time.day).padStart(2, '0');
+                                        return time;
+                                    }}
+                                }},
+                                timeScale: {{
+                                    tickMarkFormatter: (time) => {{
+                                        if (typeof time === 'object' && time.year) return time.year + '-' + String(time.month).padStart(2, '0') + '-' + String(time.day).padStart(2, '0');
+                                        return time;
+                                    }}
+                                }}
+                            }};
+                            
+                            const chart = LightweightCharts.createChart(document.getElementById('chart'), layoutOptions);
+                            
+                            chart.priceScale('right').applyOptions({{
+                                scaleMargins: {{ top: 0.02, bottom: 0.45 }}
+                            }});
 
-                    // K線
-                    const seriesK = chart.addCandlestickSeries({{ upColor: '#ef5350', downColor: '#26a69a', borderVisible: false, wickUpColor: '#ef5350', wickDownColor: '#26a69a' }});
-                    seriesK.setData(rawData.map(d => ({{time: d.time, open: d.open, high: d.high, low: d.low, close: d.close}})));
-                    
-                    // BB
-                    const bbMid = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
-                    bbMid.setData(rawData.filter(d => d.bbm !== undefined).map(d => ({{time: d.time, value: d.bbm}})));
-                    const bbUp = chart.addLineSeries({{ color: 'rgba(255, 255, 255, 0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
-                    bbUp.setData(rawData.filter(d => d.bbu !== undefined).map(d => ({{time: d.time, value: d.bbu}})));
-                    const bbDn = chart.addLineSeries({{ color: 'rgba(255, 255, 255, 0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
-                    bbDn.setData(rawData.filter(d => d.bbd !== undefined).map(d => ({{time: d.time, value: d.bbd}})));
-                    
-                    // 買賣超 (獨立座標)
-                    const seriesVol = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'vol', lastValueVisible: false, priceLineVisible: false }});
-                    seriesVol.setData(rawData.map(d => ({{time: d.time, value: d.vol, color: d.vol >= 0 ? 'rgba(239, 83, 80, 0.8)' : 'rgba(38, 166, 154, 0.8)'}})));
-                    chart.priceScale('vol').applyOptions({{ scaleMargins: {{ top: 0.58, bottom: 0.28 }}, visible: false }});
-                    
-                    // MACD 短線
-                    const seriesH1 = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'm1', lastValueVisible: false, priceLineVisible: false }});
-                    seriesH1.setData(rawData.filter(d => d.h1 !== undefined).map(d => ({{time: d.time, value: d.h1, color: d.h1 >= 0 ? 'rgba(239, 83, 80, 0.5)' : 'rgba(38, 166, 154, 0.5)'}})));
-                    const seriesM1 = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, priceScaleId: 'm1', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
-                    seriesM1.setData(rawData.filter(d => d.m1 !== undefined).map(d => ({{time: d.time, value: d.m1}})));
-                    const seriesS1 = chart.addLineSeries({{ color: '#00E676', lineWidth: 1, priceScaleId: 'm1', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
-                    seriesS1.setData(rawData.filter(d => d.s1 !== undefined).map(d => ({{time: d.time, value: d.s1}})));
-                    chart.priceScale('m1').applyOptions({{ scaleMargins: {{ top: 0.72, bottom: 0.15 }}, visible: false }});
+                            // K線
+                            const seriesK = chart.addCandlestickSeries({{ upColor: '#ef5350', downColor: '#26a69a', borderVisible: false, wickUpColor: '#ef5350', wickDownColor: '#26a69a' }});
+                            seriesK.setData(rawData.map(d => ({{time: d.time, open: d.open, high: d.high, low: d.low, close: d.close}})));
+                            
+                            // BB
+                            const bbMid = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
+                            bbMid.setData(rawData.filter(d => d.bbm !== undefined).map(d => ({{time: d.time, value: d.bbm}})));
+                            const bbUp = chart.addLineSeries({{ color: 'rgba(255, 255, 255, 0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
+                            bbUp.setData(rawData.filter(d => d.bbu !== undefined).map(d => ({{time: d.time, value: d.bbu}})));
+                            const bbDn = chart.addLineSeries({{ color: 'rgba(255, 255, 255, 0.4)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
+                            bbDn.setData(rawData.filter(d => d.bbd !== undefined).map(d => ({{time: d.time, value: d.bbd}})));
+                            
+                            // 買賣超 (獨立座標)
+                            const seriesVol = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'vol', lastValueVisible: false, priceLineVisible: false }});
+                            seriesVol.setData(rawData.map(d => ({{time: d.time, value: d.vol, color: d.vol >= 0 ? 'rgba(239, 83, 80, 0.8)' : 'rgba(38, 166, 154, 0.8)'}})));
+                            chart.priceScale('vol').applyOptions({{ scaleMargins: {{ top: 0.58, bottom: 0.28 }}, visible: false }});
+                            
+                            // MACD 短線
+                            const seriesH1 = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'm1', lastValueVisible: false, priceLineVisible: false }});
+                            seriesH1.setData(rawData.filter(d => d.h1 !== undefined).map(d => ({{time: d.time, value: d.h1, color: d.h1 >= 0 ? 'rgba(239, 83, 80, 0.5)' : 'rgba(38, 166, 154, 0.5)'}})));
+                            const seriesM1 = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, priceScaleId: 'm1', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
+                            seriesM1.setData(rawData.filter(d => d.m1 !== undefined).map(d => ({{time: d.time, value: d.m1}})));
+                            const seriesS1 = chart.addLineSeries({{ color: '#00E676', lineWidth: 1, priceScaleId: 'm1', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
+                            seriesS1.setData(rawData.filter(d => d.s1 !== undefined).map(d => ({{time: d.time, value: d.s1}})));
+                            chart.priceScale('m1').applyOptions({{ scaleMargins: {{ top: 0.72, bottom: 0.15 }}, visible: false }});
 
-                    // MACD 長線
-                    const seriesH2 = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'm2', lastValueVisible: false, priceLineVisible: false }});
-                    seriesH2.setData(rawData.filter(d => d.h2 !== undefined).map(d => ({{time: d.time, value: d.h2, color: d.h2 >= 0 ? 'rgba(239, 83, 80, 0.5)' : 'rgba(38, 166, 154, 0.5)'}})));
-                    const seriesM2 = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, priceScaleId: 'm2', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
-                    seriesM2.setData(rawData.filter(d => d.m2 !== undefined).map(d => ({{time: d.time, value: d.m2}})));
-                    const seriesS2 = chart.addLineSeries({{ color: '#00E676', lineWidth: 1, priceScaleId: 'm2', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
-                    seriesS2.setData(rawData.filter(d => d.s2 !== undefined).map(d => ({{time: d.time, value: d.s2}})));
-                    chart.priceScale('m2').applyOptions({{ scaleMargins: {{ top: 0.85, bottom: 0.0 }}, visible: false }});
+                            // MACD 長線
+                            const seriesH2 = chart.addHistogramSeries({{ priceFormat: {{ type: 'volume' }}, priceScaleId: 'm2', lastValueVisible: false, priceLineVisible: false }});
+                            seriesH2.setData(rawData.filter(d => d.h2 !== undefined).map(d => ({{time: d.time, value: d.h2, color: d.h2 >= 0 ? 'rgba(239, 83, 80, 0.5)' : 'rgba(38, 166, 154, 0.5)'}})));
+                            const seriesM2 = chart.addLineSeries({{ color: '#FFD600', lineWidth: 1, priceScaleId: 'm2', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
+                            seriesM2.setData(rawData.filter(d => d.m2 !== undefined).map(d => ({{time: d.time, value: d.m2}})));
+                            const seriesS2 = chart.addLineSeries({{ color: '#00E676', lineWidth: 1, priceScaleId: 'm2', crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false }});
+                            seriesS2.setData(rawData.filter(d => d.s2 !== undefined).map(d => ({{time: d.time, value: d.s2}})));
+                            chart.priceScale('m2').applyOptions({{ scaleMargins: {{ top: 0.85, bottom: 0.0 }}, visible: false }});
 
-                    // Streamlit 介面輸入的水平線
-                    hlines.forEach(val => {{
-                        seriesK.createPriceLine({{
-                            price: val, color: '#2962FF', lineWidth: 2, lineStyle: 2, 
-                            axisLabelVisible: true, title: '📏',
-                        }});
-                    }});
+                            // Streamlit 介面輸入的水平線
+                            hlines.forEach(val => {{
+                                seriesK.createPriceLine({{
+                                    price: val, color: '#2962FF', lineWidth: 2, lineStyle: 2, 
+                                    axisLabelVisible: true, title: '📏',
+                                }});
+                            }});
 
-                    const legend = document.getElementById('legend');
-                    const mobileDrawBtn = document.getElementById('mobileDrawBtn');
-                    const getDayOfWeek = (dStr) => ['週日', '週一', '週二', '週三', '週四', '週五', '週六'][new Date(dStr).getDay()];
-                    const dictByTime = {{}}; rawData.forEach(d => dictByTime[d.time] = d);
-                    
-                    // 如果有打勾「啟用點擊自動畫線」，就顯示那顆紅色畫線按鈕
-                    if(enableClickLine) {{
-                        mobileDrawBtn.style.display = 'block';
-                    }}
+                            const legend = document.getElementById('legend');
+                            const getDayOfWeek = (dStr) => ['週日', '週一', '週二', '週三', '週四', '週五', '週六'][new Date(dStr).getDay()];
+                            const dictByTime = {{}}; rawData.forEach(d => dictByTime[d.time] = d);
 
-                    let lastCrosshairParam = null;
+                            chart.subscribeCrosshairMove(param => {{
+                                if(!param.time || param.point === undefined || param.point.x < 0 || param.point.y < 0) {{
+                                    legend.innerHTML = '將滑鼠移至 K 線上查看數據'; return;
+                                }}
+                                
+                                let timeStr = param.time;
+                                if (typeof timeStr === 'object' && timeStr.year) {{
+                                    timeStr = timeStr.year + '-' + String(timeStr.month).padStart(2, '0') + '-' + String(timeStr.day).padStart(2, '0');
+                                }}
 
-                    chart.subscribeCrosshairMove(param => {{
-                        if(!param.time || param.point === undefined || param.point.x < 0 || param.point.y < 0) {{
-                            legend.innerHTML = '將滑鼠(或手指)移至 K 線上查看數據'; return;
-                        }}
-                        
-                        // 隨時記錄十字線的位置，給畫線按鈕使用
-                        lastCrosshairParam = param;
-                        
-                        let timeStr = param.time;
-                        if (typeof timeStr === 'object' && timeStr.year) {{
-                            timeStr = timeStr.year + '-' + String(timeStr.month).padStart(2, '0') + '-' + String(timeStr.day).padStart(2, '0');
-                        }}
+                                const d = dictByTime[timeStr] || dictByTime[param.time];
+                                if(!d) return;
 
-                        const d = dictByTime[timeStr] || dictByTime[param.time];
-                        if(!d) return;
+                                const vColor = d.vol >= 0 ? '#ef5350' : '#26a69a';
+                                
+                                let html = `
+                                    <div class="lg-title">{drawn_sid_clean} {stock_name} | ${{timeStr}} ${{getDayOfWeek(timeStr)}}</div>
+                                    <div class="lg-row"><span class="lg-label">開盤</span><span style="color:white;">${{d.open.toFixed(2)}}</span></div>
+                                    <div class="lg-row"><span class="lg-label">最高</span><span style="color:#ef5350;">${{d.high.toFixed(2)}}</span></div>
+                                    <div class="lg-row"><span class="lg-label">最低</span><span style="color:#26a69a;">${{d.low.toFixed(2)}}</span></div>
+                                    <div class="lg-row"><span class="lg-label">收盤</span><span style="color:white;font-weight:bold;">${{d.close.toFixed(2)}}</span></div>
+                                    <div class="lg-vol"><span class="lg-label">買賣超 ({drawn_br_name})</span> <span style="color:${{vColor}};">${{d.vol}} 張</span></div>
+                                `;
 
-                        const vColor = d.vol >= 0 ? '#ef5350' : '#26a69a';
-                        
-                        let html = `
-                            <div class="lg-title">{drawn_sid_clean} {stock_name} | ${{timeStr}} ${{getDayOfWeek(timeStr)}}</div>
-                            <div class="lg-row"><span class="lg-label">開盤</span><span style="color:white;">${{d.open.toFixed(2)}}</span></div>
-                            <div class="lg-row"><span class="lg-label">最高</span><span style="color:#ef5350;">${{d.high.toFixed(2)}}</span></div>
-                            <div class="lg-row"><span class="lg-label">最低</span><span style="color:#26a69a;">${{d.low.toFixed(2)}}</span></div>
-                            <div class="lg-row"><span class="lg-label">收盤</span><span style="color:white;font-weight:bold;">${{d.close.toFixed(2)}}</span></div>
-                            <div class="lg-vol"><span class="lg-label">買賣 ({drawn_br_name})</span> <span style="color:${{vColor}};">${{d.vol}} 張</span></div>
-                        `;
+                                if(d.h1 !== undefined) html += `<div class="lg-macd"><b>短 MACD:</b> 柱 <span style="color:${{d.h1>=0?'#ef5350':'#26a69a'}}">${{d.h1.toFixed(2)}}</span> | 快 <span style="color:#FFD600">${{d.m1.toFixed(2)}}</span> | 慢 <span style="color:#00E676">${{d.s1.toFixed(2)}}</span></div>`;
+                                if(d.h2 !== undefined) html += `<div class="lg-macd"><b>長 MACD:</b> 柱 <span style="color:${{d.h2>=0?'#ef5350':'#26a69a'}}">${{d.h2.toFixed(2)}}</span> | 快 <span style="color:#FFD600">${{d.m2.toFixed(2)}}</span> | 慢 <span style="color:#00E676">${{d.s2.toFixed(2)}}</span></div>`;
+                                
+                                legend.innerHTML = html;
+                            }});
 
-                        if(d.h1 !== undefined) html += `<div class="lg-macd"><b>短 MACD:</b> 柱 <span style="color:${{d.h1>=0?'#ef5350':'#26a69a'}}">${{d.h1.toFixed(2)}}</span> | 快 <span style="color:#FFD600">${{d.m1.toFixed(2)}}</span> | 慢 <span style="color:#00E676">${{d.s1.toFixed(2)}}</span></div>`;
-                        if(d.h2 !== undefined) html += `<div class="lg-macd"><b>長 MACD:</b> 柱 <span style="color:${{d.h2>=0?'#ef5350':'#26a69a'}}">${{d.h2.toFixed(2)}}</span> | 快 <span style="color:#FFD600">${{d.m2.toFixed(2)}}</span> | 慢 <span style="color:#00E676">${{d.s2.toFixed(2)}}</span></div>`;
-                        
-                        legend.innerHTML = html;
-                    }});
+                            // ==========================================
+                            // 🆕 點擊 K 棒自動畫出水平射線 (支撐/壓力線) 防誤觸版
+                            // ==========================================
+                            const enableClickLine = {'true' if enable_click_line else 'false'};
+                            
+                            chart.subscribeClick(param => {{
+                                // 確保有開啟功能並點擊到圖表有效範圍
+                                if(!enableClickLine) return;
+                                if(!param.time || param.point === undefined || param.point.y < 0) return;
 
-                    // ==========================================
-                    // 🆕 手機友好版：點擊按鈕，在目前十字線位置畫線
-                    // ==========================================
-                    mobileDrawBtn.addEventListener('click', () => {{
-                        if(!lastCrosshairParam || !lastCrosshairParam.time || lastCrosshairParam.point === undefined || lastCrosshairParam.point.y < 0) {{
-                            alert('請先觸碰圖表，將十字線移動到指定的 K 棒上！');
-                            return;
-                        }}
-                        
-                        let timeStr = lastCrosshairParam.time;
-                        if (typeof timeStr === 'object' && timeStr.year) {{
-                            timeStr = timeStr.year + '-' + String(timeStr.month).padStart(2, '0') + '-' + String(timeStr.day).padStart(2, '0');
-                        }}
+                                let timeStr = param.time;
+                                if (typeof timeStr === 'object' && timeStr.year) {{
+                                    timeStr = timeStr.year + '-' + String(timeStr.month).padStart(2, '0') + '-' + String(timeStr.day).padStart(2, '0');
+                                }}
 
-                        const d = dictByTime[timeStr] || dictByTime[lastCrosshairParam.time];
-                        if(!d) return;
+                                // 取出點擊那一天的 K 棒數據
+                                const d = dictByTime[timeStr] || dictByTime[param.time];
+                                if(!d) return;
 
-                        // 抓取游標(或手指)的最後 Y 座標換算價格
-                        const clickedPrice = seriesK.coordinateToPrice(lastCrosshairParam.point.y);
-                        if(clickedPrice === null) return;
+                                // 將滑鼠點擊的 Y 軸座標換算成價格
+                                const clickedPrice = seriesK.coordinateToPrice(param.point.y);
+                                if(clickedPrice === null) return;
 
-                        const midPrice = (d.high + d.low) / 2;
-                        
-                        let targetPrice, lineColor, lineTitle;
-                        // 手指在 K 棒中線之上畫紅線(壓力)，在下畫綠線(支撐)
-                        if (clickedPrice >= midPrice) {{
-                            targetPrice = d.high;
-                            lineColor = '#ef5350'; 
-                            lineTitle = '壓力 ' + targetPrice.toFixed(2);
-                        }} else {{
-                            targetPrice = d.low;
-                            lineColor = '#26a69a'; 
-                            lineTitle = '支撐 ' + targetPrice.toFixed(2);
-                        }}
+                                // 計算 K 棒一半的位置
+                                const midPrice = (d.high + d.low) / 2;
+                                
+                                let targetPrice, lineColor, lineTitle;
+                                // 判斷：點在 K 棒中線以上 -> 抓高點 (壓力)；點在以下 -> 抓低點 (支撐)
+                                if (clickedPrice >= midPrice) {{
+                                    targetPrice = d.high;
+                                    lineColor = '#ef5350'; // 紅色
+                                    lineTitle = '壓力 ' + targetPrice.toFixed(2);
+                                }} else {{
+                                    targetPrice = d.low;
+                                    lineColor = '#26a69a'; // 綠色
+                                    lineTitle = '支撐 ' + targetPrice.toFixed(2);
+                                }}
 
-                        const raySeries = chart.addLineSeries({{
-                            color: lineColor,
-                            lineWidth: 2,
-                            lineStyle: 2, 
-                            lastValueVisible: true,
-                            priceLineVisible: false,
-                            crosshairMarkerVisible: false,
-                            title: lineTitle
-                        }});
+                                // 創建一個向右延伸的射線
+                                const raySeries = chart.addLineSeries({{
+                                    color: lineColor,
+                                    lineWidth: 2,
+                                    lineStyle: 2, 
+                                    lastValueVisible: true,
+                                    priceLineVisible: false,
+                                    crosshairMarkerVisible: false,
+                                    title: lineTitle
+                                }});
 
-                        const lastDataTime = rawData[rawData.length - 1].time;
-                        if (d.time === lastDataTime) {{
-                            raySeries.setData([ {{ time: d.time, value: targetPrice }} ]);
-                        }} else {{
-                            raySeries.setData([
-                                {{ time: d.time, value: targetPrice }},
-                                {{ time: lastDataTime, value: targetPrice }}
-                            ]);
-                        }}
-                    }});
+                                const lastDataTime = rawData[rawData.length - 1].time;
+                                
+                                // 避開如果點擊的就是最新一天，兩個端點相同的問題
+                                if (d.time === lastDataTime) {{
+                                    raySeries.setData([ {{ time: d.time, value: targetPrice }} ]);
+                                }} else {{
+                                    raySeries.setData([
+                                        {{ time: d.time, value: targetPrice }},
+                                        {{ time: lastDataTime, value: targetPrice }}
+                                    ]);
+                                }}
+                            }});
 
-                    // 保留電腦版雙擊或點擊功能 (相容滑鼠)
-                    chart.subscribeClick(param => {{
-                        // 電腦版點擊圖表也可觸發畫線(需打勾)
-                        if(!enableClickLine) return;
-                        if(param.point && param.point.x < window.innerWidth - 100) {{ // 避免按到按鈕時誤判
-                             mobileDrawBtn.click();
-                        }}
-                    }});
-
-                    new ResizeObserver(() => {{
-                        chart.applyOptions({{
-                            width: document.getElementById('wrapper').clientWidth, 
-                            height: document.getElementById('wrapper').clientHeight
-                        }});
-                        chart.timeScale().fitContent();
-                    }}).observe(document.getElementById('wrapper'));
-                    
-                    setTimeout(() => {{ chart.timeScale().fitContent(); }}, 100);
-                </script>
-                <!-- Render Key: {st.session_state.chart_render_key} -->
-            </body>
-            </html>
-            """
-            
-            components.html(html_code, height=800)
-
-        except Exception as e:
-            st.error(f"發生錯誤: {e}")
+                            new ResizeObserver(() => {{
+                                chart.applyOptions({{
+                                    width: document.getElementById('wrapper').clientWidth, 
+                                    height: document.getElementById('wrapper').clientHeight
+                                }});
+                                chart.timeScale().fitContent();
+                            }}).observe(document.getElementById('wrapper'));
+                            
+                            setTimeout(() => {{ chart.timeScale().fitContent(); }}, 100);
+                        </script>
+                        <!-- Render Key: {st.session_state.chart_render_key} -->
+                    </body>
+                    </html>
+                    """
+                    components.html(html_code, height=800)
+            except Exception as e: st.error(f"發生錯誤: {e}")
