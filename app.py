@@ -1123,7 +1123,7 @@ with tab4:
                                     text: '{drawn_sid_clean} {stock_name}', fontSize: 80,
                                     horzAlign: 'center', vertAlign: 'center',
                                 }},
-                                grid: {{ vertLines: {{ color: '#242733' }}, horzLines: {{ color: '#242733' }} }}, 
+                                grid: {{ vertLines: {{ visible: false }}, horzLines: {{ visible: false }} }}, 
                                 crosshair: {{ mode: LightweightCharts.CrosshairMode.Normal }},
                                 localization: {{
                                     timeFormatter: time => {{
