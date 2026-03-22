@@ -859,10 +859,8 @@ with tab4:
         st.write("")
         draw_btn = st.button("🎨 繪圖", use_container_width=True)
 
-    # ── 第二排：週期 + K棒數 + 存入清單 ──
-    c_period, c_days, c_fav = st.columns([2, 2, 1])
-    with c_period:
-        t4_period = st.radio("週期", ["日", "週", "月"], horizontal=True)
+    # ── 第二排：K棒數 + 存入清單 ──
+    c_days, c_fav = st.columns([3, 1])
     with c_days:
         t4_days = st.number_input("K棒數", value=200, min_value=10, max_value=1000)
     with c_fav:
@@ -965,13 +963,24 @@ with tab4:
 
     st.markdown("---")
 
-    if 'enable_click_line' not in st.session_state:
-        st.session_state.enable_click_line = False
+    # ── 週期切換放在圖表正上方，方便隨時切換不需捲回頂部 ──
+    c_period_bot, c_click = st.columns([1, 3])
+    with c_period_bot:
+        t4_period = st.radio("切換週期", ["日", "週", "月"], horizontal=True, key="t4_period_bot")
+    with c_click:
+        if 'enable_click_line' not in st.session_state:
+            st.session_state.enable_click_line = False
+        enable_click_line = st.checkbox(
+            "👆 啟用點擊 K 棒自動畫線 (防止手機滑動時誤觸)",
+            key="enable_click_line"
+        )
 
-    enable_click_line = st.checkbox(
-        "👆 啟用點擊 K 棒自動畫線 (防止手機滑動時誤觸)",
-        key="enable_click_line"
-    )
+    # 週期切換時自動重繪
+    if st.session_state.get('show_chart', False):
+        if t4_period != st.session_state.get('drawn_period', '日'):
+            st.session_state.drawn_period = t4_period
+            st.session_state.chart_render_key += 1
+            st.rerun()
 
     # 執行繪圖
     if draw_btn or st.session_state.auto_draw:
@@ -1153,7 +1162,7 @@ with tab4:
                                     : 'rgba(38, 166, 154, 0.5)';
                                 const extLine = chart.addLineSeries({{
                                     color: lineColor,
-                                    lineWidth: 1,
+                                    lineWidth: 2,
                                     lineStyle: 1,          // 虛線
                                     lastValueVisible: false, // 右側不顯示標籤
                                     priceLineVisible: false,
