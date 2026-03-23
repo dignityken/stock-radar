@@ -975,10 +975,8 @@ def merge_kline_markers(markers):
 
 # --- Tab 4 (專業繪圖) ---
 with tab4:
-    # ── CSS：限制控制區最大寬度，電腦版不拉伸，手機版全寬 ──
     st.markdown("""
     <style>
-    /* 只限制 Tab4 控制區的 columns，不影響圖表 iframe */
     [data-testid="stHorizontalBlock"]:has(input, select, button) { max-width: 700px !important; }
     </style>
     """, unsafe_allow_html=True)
@@ -986,8 +984,8 @@ with tab4:
     if st.session_state.auto_draw:
         st.success("✅ 參數已帶入！請直接查看下方圖表。")
 
-    # ── 第一排：股票代號 + 搜尋分點 + 繪圖 ──
-    c_sid, c_br, c_draw = st.columns([1, 3, 1])
+    # ── 第一排：股票代號 + 搜尋分點 + 🎨繪圖 + ❤️存入 ──
+    c_sid, c_br, c_draw, c_fav = st.columns([1, 3, 1, 1])
     with c_sid:
         t4_sid = st.text_input("股票代號", value=st.session_state.get('t4_target_sid', '6488'))
     with c_br:
@@ -997,37 +995,10 @@ with tab4:
         t4_br_name = st.selectbox("搜尋分點", all_br_names, index=idx)
     with c_draw:
         st.write("")
-        draw_btn = st.button("🎨 繪圖", use_container_width=True)
-
-    # ── 第二排：K棒數 + 存入清單 + 水平線 + 加入 + 清除（全部一排） ──
-    c_days, c_fav, c_hval, c_hadd, c_hclr = st.columns([2, 1, 2, 1, 1])
-    with c_days:
-        t4_days = st.number_input("K棒數", value=200, min_value=10, max_value=1000)
+        draw_btn = st.button("🎨 繪圖", use_container_width=True, key="draw_btn_top")
     with c_fav:
         st.write("")
         fav_btn = st.button("❤️ 存入", use_container_width=True)
-    with c_hval:
-        hline_val = st.number_input("📏 水平線價格", value=0.0, step=1.0, key="hline_val_input")
-    with c_hadd:
-        st.write("")
-        if st.button("➕ 畫線", use_container_width=True):
-            if hline_val > 0 and hline_val not in st.session_state.custom_hlines:
-                st.session_state.custom_hlines.append(hline_val)
-            st.session_state.t4_target_sid = t4_sid
-            st.session_state.t4_target_br = t4_br_name
-            st.session_state.auto_draw = True
-            st.session_state.chart_render_key += 1
-            st.rerun()
-    with c_hclr:
-        st.write("")
-        if st.button("🗑️ 清除", use_container_width=True):
-            st.session_state.custom_hlines = []
-            st.session_state.click_lines = []
-            st.session_state.t4_target_sid = t4_sid
-            st.session_state.t4_target_br = t4_br_name
-            st.session_state.auto_draw = True
-            st.session_state.chart_render_key += 1
-            st.rerun()
 
     t4_sid_clean = t4_sid.strip().upper()
 
@@ -1100,17 +1071,45 @@ with tab4:
 
     st.markdown("---")
 
-    # ── 週期切換放在圖表正上方，方便隨時切換不需捲回頂部 ──
-    c_period_bot, c_click = st.columns([1, 3])
-    with c_period_bot:
-        t4_period = st.radio("切換週期", ["日", "週", "月"], horizontal=True, key="t4_period_bot")
+    # ── 圖表上方工具列：週期 + K棒數 + 水平線 + ➕畫線 + 👆啟用 + 🗑️清除 + 🎨繪圖 ──
+    c_per, c_days, c_hval, c_hadd, c_click, c_hclr, c_draw2 = st.columns([2, 1, 2, 1, 1, 1, 1])
+    with c_per:
+        t4_period = st.radio("週期", ["日", "週", "月"], horizontal=True, key="t4_period_bot")
+    with c_days:
+        t4_days = st.number_input("K棒數", value=200, min_value=10, max_value=1000)
+    with c_hval:
+        hline_val = st.number_input("📏 水平線", value=0.0, step=1.0, key="hline_val_input")
+    with c_hadd:
+        st.write("")
+        if st.button("➕", use_container_width=True, help="加入水平線"):
+            if hline_val > 0 and hline_val not in st.session_state.custom_hlines:
+                st.session_state.custom_hlines.append(hline_val)
+            st.session_state.t4_target_sid = t4_sid
+            st.session_state.t4_target_br = t4_br_name
+            st.session_state.auto_draw = True
+            st.session_state.chart_render_key += 1
+            st.rerun()
     with c_click:
+        st.write("")
         if 'enable_click_line' not in st.session_state:
             st.session_state.enable_click_line = False
-        enable_click_line = st.checkbox(
-            "👆 啟用點擊 K 棒自動畫線 (防止手機滑動時誤觸)",
-            key="enable_click_line"
-        )
+        enable_click_line = st.checkbox("👆", key="enable_click_line", help="啟用點擊K棒畫線")
+    with c_hclr:
+        st.write("")
+        if st.button("🗑️", use_container_width=True, help="清除所有畫線"):
+            st.session_state.custom_hlines = []
+            st.session_state.click_lines = []
+            st.session_state.t4_target_sid = t4_sid
+            st.session_state.t4_target_br = t4_br_name
+            st.session_state.auto_draw = True
+            st.session_state.chart_render_key += 1
+            st.rerun()
+    with c_draw2:
+        st.write("")
+        draw_btn2 = st.button("🎨", use_container_width=True, help="繪圖")
+
+    # 圖表上方繪圖按鈕也要觸發繪圖
+    draw_btn = draw_btn or draw_btn2
 
     # 週期切換時自動重繪
     if st.session_state.get('show_chart', False):
