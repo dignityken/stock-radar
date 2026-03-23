@@ -20,11 +20,16 @@ try:
 except ImportError:
     GSHEETS_AVAILABLE = False
 
+try:
+    import bcrypt
+    BCRYPT_AVAILABLE = True
+except ImportError:
+    BCRYPT_AVAILABLE = False
+
 # 忽略 SSL 警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="籌碼雷達", layout="wide")
-# 隱藏 Streamlit 預設的右上角選單與底部浮水印
 hide_streamlit_style = """
             <style>
             #MainMenu {visibility: hidden;}
@@ -34,15 +39,84 @@ hide_streamlit_style = """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 # ==========================================
-# 🔒 進入門檻：通行密碼與免登書籤系統
+# 👤 Users 分頁：email 帳號系統
 # ==========================================
+@st.cache_resource(ttl=300)  # 5分鐘快取，讓新開通帳號能及時生效
+def get_users_sheet():
+    if not GSHEETS_AVAILABLE or "gcp_service_account" not in st.secrets:
+        return None
+    if "gsheets" not in st.secrets or "spreadsheet_url" not in st.secrets["gsheets"]:
+        return None
+    try:
+        scopes = ['https://www.googleapis.com/auth/spreadsheets']
+        creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
+        client = gspread.authorize(creds)
+        raw_url = st.secrets["gsheets"]["spreadsheet_url"]
+        doc = client.open_by_url(raw_url.split("?")[0])
+        try:
+            ws = doc.worksheet("Users")
+        except gspread.exceptions.WorksheetNotFound:
+            # 自動建立 Users 分頁並加上標題列
+            ws = doc.add_worksheet(title="Users", rows="500", cols="5")
+            ws.append_row(["email", "password_hash", "username", "status", "expire_date"])
+        return ws
+    except Exception:
+        return None
+
+def verify_email_login(email, password):
+    """驗證 email + 密碼，回傳 (success, username, message)"""
+    if not BCRYPT_AVAILABLE:
+        return False, "", "伺服器未安裝 bcrypt 套件"
+    ws = get_users_sheet()
+    if not ws:
+        return False, "", "無法連線用戶資料庫"
+    try:
+        records = ws.get_all_records()
+        email_lower = email.strip().lower()
+        for row in records:
+            if str(row.get("email", "")).strip().lower() == email_lower:
+                # 檢查帳號狀態
+                status = str(row.get("status", "")).strip().lower()
+                if status == "pending":
+                    return False, "", "⏳ 帳號審核中，請等待管理員開通。"
+                if status != "active":
+                    return False, "", "🚫 帳號已停用，請洽管理員。"
+                # 檢查到期日
+                exp_str = str(row.get("expire_date", "2099-12-31")).strip()
+                try:
+                    if datetime.date.today() > datetime.datetime.strptime(exp_str, "%Y-%m-%d").date():
+                        return False, "", "⚠️ 帳號已到期，請洽管理員續期。"
+                except: pass
+                # 驗證密碼
+                stored_hash = str(row.get("password_hash", "")).strip()
+                if bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8")):
+                    username = str(row.get("username", email)).strip()
+                    return True, username, "OK"
+                else:
+                    return False, "", "🚫 密碼錯誤"
+        return False, "", "🚫 找不到此 email"
+    except Exception as e:
+        return False, "", f"驗證失敗: {str(e)}"
+
+def hash_password(password):
+    """產生 bcrypt hash，供管理員手動建立帳號時使用"""
+    if not BCRYPT_AVAILABLE:
+        return ""
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+# ==========================================
+# 🔒 登入系統：新舊並存（email+密碼 ＋ 舊密碼制）
+# ==========================================
+# 申請帳號的 Google 表單連結（填入你的表單網址）
+SIGNUP_FORM_URL = st.secrets.get("signup_form_url", "")
+
 def check_password():
-    if st.session_state.get("password_correct") == True: 
+    if st.session_state.get("password_correct") == True:
         return True
 
-    valid_passwords = st.secrets.get("passwords", {"測試帳號": "0000|2099-12-31"})
+    # ── 舊系統：token URL 自動登入（維持相容）──
+    valid_passwords = st.secrets.get("passwords", {})
     query_params = st.query_params
-    
     if "token" in query_params:
         url_token = query_params["token"]
         for user, auth_string in valid_passwords.items():
@@ -53,7 +127,7 @@ def check_password():
                         st.session_state["password_correct"] = True
                         st.session_state["username"] = user
                         st.session_state["user_token"] = url_token
-                        # 只在 token 還在 URL 時才清除，避免重複 rerun 造成重定向錯誤
+                        st.session_state["login_method"] = "legacy"
                         if "token" in st.query_params:
                             st.query_params.clear()
                         return True
@@ -61,51 +135,114 @@ def check_password():
                     st.session_state["password_correct"] = True
                     st.session_state["username"] = user
                     st.session_state["user_token"] = url_token
+                    st.session_state["login_method"] = "legacy"
                     if "token" in st.query_params:
                         st.query_params.clear()
                     return True
 
-    def password_entered():
-        user_pwd_input = st.session_state["pwd_input"].strip()
-        match_found = False
-        is_expired = False
-        matched_user = ""
-        for user, auth_string in valid_passwords.items():
-            parts = str(auth_string).split("|")
-            pwd = parts[0].strip()
-            exp_date_str = parts[1].strip() if len(parts) > 1 else "2099-12-31" 
-            if user_pwd_input == pwd:
-                match_found = True
-                matched_user = user
-                try:
-                    if datetime.date.today() > datetime.datetime.strptime(exp_date_str, "%Y-%m-%d").date():
-                        is_expired = True
-                except: pass
-                break 
-
-        if match_found and not is_expired:
-            st.session_state["password_correct"] = True
-            st.session_state["username"] = matched_user
-            st.session_state["user_token"] = user_pwd_input
-            st.query_params.clear()
-            del st.session_state["pwd_input"]  
-        elif match_found and is_expired:
-            st.session_state["password_correct"] = "expired"
-        else:
-            st.session_state["password_correct"] = False
-
-    if st.session_state.get("password_correct") == True: 
+    if st.session_state.get("password_correct") == True:
         return True
 
-    st.markdown("<br><br><h1 style='text-align: center;'>🔒 籌碼雷達</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center;'>成功登入後，將網址加入書籤即可免重複輸入密碼。</p>", unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns([1, 1, 1])
-    with col2:
-        st.text_input("輸入通行密碼：", type="password", on_change=password_entered, key="pwd_input")
-        status = st.session_state.get("password_correct")
-        if status == False: st.error("🚫 密碼錯誤")
-        elif status == "expired": st.warning("⚠️ 會員權限已到期，請洽管理員。")
+    # ── 登入頁面 UI ──
+    st.markdown("""
+    <style>
+    .login-box { max-width: 420px; margin: 60px auto 0 auto; }
+    .login-title { text-align: center; font-size: 2rem; font-weight: bold; margin-bottom: 4px; }
+    .login-sub { text-align: center; color: #888; margin-bottom: 28px; font-size: 0.95rem; }
+    .login-divider { text-align: center; color: #555; margin: 16px 0; font-size: 0.85rem; }
+    .login-signup { text-align: center; margin-top: 20px; font-size: 0.85rem; color: #888; }
+    .login-signup a { color: #4e8cff; text-decoration: none; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    _, col, _ = st.columns([1, 2, 1])
+    with col:
+        st.markdown('<div class="login-title">📡 籌碼雷達</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-sub">法人籌碼追蹤平台</div>', unsafe_allow_html=True)
+
+        login_status = st.session_state.get("login_status", "")
+
+        # ── 新系統：email + 密碼 ──
+        email_input = st.text_input(
+            "Email", 
+            placeholder="your@email.com",
+            key="login_email",
+            autocomplete="email"
+        )
+        pw_input = st.text_input(
+            "密碼", 
+            type="password",
+            placeholder="輸入密碼",
+            key="login_pw",
+            autocomplete="current-password"
+        )
+
+        if st.button("🔐 登入", use_container_width=True, type="primary"):
+            if email_input and pw_input:
+                success, username, msg = verify_email_login(email_input, pw_input)
+                if success:
+                    st.session_state["password_correct"] = True
+                    st.session_state["username"] = username
+                    st.session_state["user_token"] = email_input
+                    st.session_state["login_method"] = "email"
+                    st.session_state["login_status"] = ""
+                    st.rerun()
+                else:
+                    st.session_state["login_status"] = msg
+                    st.rerun()
+            else:
+                st.session_state["login_status"] = "請輸入 Email 和密碼"
+                st.rerun()
+
+        if login_status:
+            if "OK" not in login_status:
+                st.error(login_status)
+
+        # ── 分隔線 ──
+        st.markdown('<div class="login-divider">── 或使用舊版通行密碼 ──</div>', unsafe_allow_html=True)
+
+        # ── 舊系統：通行密碼 ──
+        def legacy_password_entered():
+            user_pwd_input = st.session_state["legacy_pwd_input"].strip()
+            for user, auth_string in valid_passwords.items():
+                parts = str(auth_string).split("|")
+                pwd = parts[0].strip()
+                exp_date_str = parts[1].strip() if len(parts) > 1 else "2099-12-31"
+                if user_pwd_input == pwd:
+                    try:
+                        if datetime.date.today() > datetime.datetime.strptime(exp_date_str, "%Y-%m-%d").date():
+                            st.session_state["login_status"] = "⚠️ 通行密碼已到期，請洽管理員。"
+                            return
+                    except: pass
+                    st.session_state["password_correct"] = True
+                    st.session_state["username"] = user
+                    st.session_state["user_token"] = user_pwd_input
+                    st.session_state["login_method"] = "legacy"
+                    st.session_state["login_status"] = ""
+                    del st.session_state["legacy_pwd_input"]
+                    return
+            st.session_state["login_status"] = "🚫 通行密碼錯誤"
+
+        st.text_input(
+            "通行密碼",
+            type="password",
+            placeholder="輸入通行密碼",
+            on_change=legacy_password_entered,
+            key="legacy_pwd_input"
+        )
+
+        # ── 申請帳號連結 ──
+        if SIGNUP_FORM_URL:
+            st.markdown(
+                f'<div class="login-signup">還沒有帳號？ <a href="{SIGNUP_FORM_URL}" target="_blank">申請加入 →</a></div>',
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                '<div class="login-signup">需要帳號請洽管理員</div>',
+                unsafe_allow_html=True
+            )
+
     return False
 
 if not check_password(): st.stop()  
@@ -177,12 +314,16 @@ def save_gsheet_watchlist(username, wl_list):
 # ==========================================
 with st.sidebar:
     current_user = st.session_state.get('username', 'VIP會員')
-    st.markdown(f"### 👤 登入身份：{current_user}")
-    st.caption("✅ 網址列已隱藏密碼，直接複製分享網址絕對安全。")
-    with st.expander("🔗 取得免登入書籤網址"):
-        st.write("若要在您的電腦/手機免密碼登入，請將下方參數**接在您的網站主網址後方**並加入書籤：")
-        st.code(f"?token={st.session_state.get('user_token', '')}", language="text")
-        st.caption("⚠️ 此參數等同您的密碼，請勿外流！")
+    login_method = st.session_state.get('login_method', 'legacy')
+    st.markdown(f"### 👤 {current_user}")
+    if login_method == "email":
+        st.caption("✅ 已用 Email 帳號登入")
+    else:
+        st.caption("✅ 網址列已隱藏密碼，直接複製分享網址絕對安全。")
+        with st.expander("🔗 取得免登入書籤網址"):
+            st.write("若要在您的電腦/手機免密碼登入，請將下方參數**接在您的網站主網址後方**並加入書籤：")
+            st.code(f"?token={st.session_state.get('user_token', '')}", language="text")
+            st.caption("⚠️ 此參數等同您的密碼，請勿外流！")
         
     if not GSHEETS_AVAILABLE or "gcp_service_account" not in st.secrets:
         st.warning("⚠️ 系統未偵測到 Google Sheets 金鑰，清單將僅暫存於本次連線。")
