@@ -29,7 +29,7 @@ except ImportError:
 # 忽略 SSL 警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-st.set_page_config(page_title="籌碼雷達", layout="wide")
+st.set_page_config(page_title="stock-radar", layout="wide")
 hide_streamlit_style = """
             <style>
             #MainMenu {visibility: hidden;}
@@ -157,8 +157,8 @@ def check_password():
 
     _, col, _ = st.columns([1, 2, 1])
     with col:
-        st.markdown('<div class="login-title">📡 籌碼雷達</div>', unsafe_allow_html=True)
-        st.markdown('<div class="login-sub">法人籌碼追蹤平台</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-title">📡 stock-radar</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-sub">分點追蹤平台</div>', unsafe_allow_html=True)
 
         login_status = st.session_state.get("login_status", "")
 
@@ -740,7 +740,7 @@ with tab3:
     with c5: t3_u = st.radio("統計單位", ["張數", "金額"], horizontal=True, key="t3_unit")
 
     c6, c7, c8 = st.columns([1.5, 1, 1])
-    with c6: t3_mode = st.radio("篩選條件", ["嚴格模式 (只買不賣)", "濾網模式 (自訂佔比)"], index=1, horizontal=True, key="t3_mode")
+    with c6: t3_mode = st.radio("篩選條件", ["嚴格模式", "濾網模式"], index=1, horizontal=True, key="t3_mode")
     with c7: t3_p = st.number_input("佔比 >= (%)", 0.0, 100.0, 95.0, step=1.0, key="t3_pct")
     with c8: st.write(""); show_full_t3 = st.checkbox("顯示完整清單", value=False, key="t3_full")
 
