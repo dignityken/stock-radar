@@ -53,13 +53,16 @@ def check_password():
                         st.session_state["password_correct"] = True
                         st.session_state["username"] = user
                         st.session_state["user_token"] = url_token
-                        st.query_params.clear()
+                        # 只在 token 還在 URL 時才清除，避免重複 rerun 造成重定向錯誤
+                        if "token" in st.query_params:
+                            st.query_params.clear()
                         return True
                 except:
                     st.session_state["password_correct"] = True
                     st.session_state["username"] = user
                     st.session_state["user_token"] = url_token
-                    st.query_params.clear()
+                    if "token" in st.query_params:
+                        st.query_params.clear()
                     return True
 
     def password_entered():
