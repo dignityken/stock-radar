@@ -45,7 +45,7 @@ st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 def get_users_sheet():
     if not GSHEETS_AVAILABLE or "gcp_service_account" not in st.secrets:
         return None
-    if "gsheets" not in st.secrets or "spreadsheet_url" not in st.secrets["gsheets"]:
+    if "gsheets" not in st.secrets or "spreadsheet_url" not in st.secrets["gsheets"]:signup_form_url
         return None
     try:
         scopes = ['https://www.googleapis.com/auth/spreadsheets']
@@ -157,8 +157,8 @@ def check_password():
 
     _, col, _ = st.columns([1, 2, 1])
     with col:
-        st.markdown('<div class="login-title">📡 籌碼雷達</div>', unsafe_allow_html=True)
-        st.markdown('<div class="login-sub">法人籌碼追蹤平台</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-title">📡stock-radar</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-sub">券商分點追蹤平台</div>', unsafe_allow_html=True)
 
         login_status = st.session_state.get("login_status", "")
 
@@ -509,7 +509,7 @@ def safe_float(val):
 # ==========================================
 # 1. UI 介面設定
 # ==========================================
-tab1, tab2, tab3, tab4 = st.tabs(["🚀 特定分點", "📊 股票代號", "📍 地緣券商", "📊 主力 K 線圖"])
+tab1, tab2, tab3, tab4 = st.tabs(["🚀 特定分點", "📊 股票代號", "📍 地緣券商", "📊 分點K 線圖"])
 
 # --- Tab 1 ---
 with tab1:
@@ -720,7 +720,7 @@ with tab2:
 # --- Tab 3 ---
 with tab3:
     st.markdown("### 📍 尋找地緣/同名分點進出")
-    st.caption("透過分點名稱後綴（例如：城中、三重、信義）跨券商尋找特定地區的買賣神人。")
+    st.caption("透過分點名稱後綴（例如：城中、三重、信義）跨券商尋找特定地區的買賣。")
     c1, c2 = st.columns(2)
     with c1:
         sorted_loc_keys = sorted(GEO_MAP.keys())
@@ -740,7 +740,7 @@ with tab3:
     with c5: t3_u = st.radio("統計單位", ["張數", "金額"], horizontal=True, key="t3_unit")
 
     c6, c7, c8 = st.columns([1.5, 1, 1])
-    with c6: t3_mode = st.radio("篩選條件", ["嚴格模式 (只買不賣)", "濾網模式 (自訂佔比)"], index=1, horizontal=True, key="t3_mode")
+    with c6: t3_mode = st.radio("篩選條件", ["嚴格模式", "濾網模式"], index=1, horizontal=True, key="t3_mode")
     with c7: t3_p = st.number_input("佔比 >= (%)", 0.0, 100.0, 95.0, step=1.0, key="t3_pct")
     with c8: st.write(""); show_full_t3 = st.checkbox("顯示完整清單", value=False, key="t3_full")
 
