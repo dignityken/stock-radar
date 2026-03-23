@@ -616,9 +616,9 @@ with tab1:
 
         col_b = '買進金額' if '金額' in t1_u else '買進張數'
         col_s = '賣出金額' if '金額' in t1_u else '賣出張數'
-        st.markdown(f"### 🔴 大戶吃貨中 - 共 {len(st.session_state.t1_buy_df)} 檔")
+        st.markdown(f"### 🔴 買進 - 共 {len(st.session_state.t1_buy_df)} 檔")
         display_table_with_button(st.session_state.t1_buy_df.sort_values(by=col_b, ascending=False).head(999 if show_full else 10), "t1_buy")
-        st.markdown(f"### 🟢 大戶倒貨中 - 共 {len(st.session_state.t1_sell_df)} 檔")
+        st.markdown(f"### 🟢 賣出 - 共 {len(st.session_state.t1_sell_df)} 檔")
         display_table_with_button(st.session_state.t1_sell_df.sort_values(by=col_s, ascending=False).head(999 if show_full else 10), "t1_sell")
 
 # --- Tab 2 ---
@@ -712,15 +712,15 @@ with tab2:
                             st.session_state.table_refresh_key += 1 
                             st.rerun()
 
-        st.subheader("🔴 吃貨主力分點")
+        st.subheader("🔴 買進分點")
         display_table_with_button_t2(st.session_state.t2_buy_df.sort_values('買', ascending=False).head(999 if show_full_t2 else 10), "t2_buy")
-        st.subheader("🟢 倒貨主力分點")
+        st.subheader("🟢 賣出分點")
         display_table_with_button_t2(st.session_state.t2_sell_df.sort_values('賣', ascending=False).head(999 if show_full_t2 else 10), "t2_sell")
 
 # --- Tab 3 ---
 with tab3:
     st.markdown("### 📍 尋找地緣/同名分點進出")
-    st.caption("透過分點名稱後綴（例如：城中、三重、信義）跨券商尋找特定地區的買賣神人。")
+    st.caption("透過分點名稱後綴（例如：城中、三重、信義）跨券商尋找特定地區的買賣。")
     c1, c2 = st.columns(2)
     with c1:
         sorted_loc_keys = sorted(GEO_MAP.keys())
@@ -834,9 +834,9 @@ with tab3:
         sd_s, ed_s = t3_sd.strftime('%Y-%m-%d'), t3_ed.strftime('%Y-%m-%d')
         st.subheader(f"🕵️ 地緣雷達結果：{sel_t3_br_l}")
         st.caption(f"📌 區間：{sd_s} ~ {ed_s} | 單位：{t3_u}")
-        st.markdown(f"### 🔴 該分點吃貨中 (極端買進) - 共 {len(st.session_state.t3_buy_df)} 檔")
+        st.markdown(f"### 🔴 該分點買進 - 共 {len(st.session_state.t3_buy_df)} 檔")
         display_table_with_button_t3(st.session_state.t3_buy_df.sort_values(by=col_buy, ascending=False).head(999 if show_full_t3 else 10), "t3_buy")
-        st.markdown(f"### 🟢 該分點倒貨中 (極端賣出) - 共 {len(st.session_state.t3_sell_df)} 檔")
+        st.markdown(f"### 🟢 該分點賣出 - 共 {len(st.session_state.t3_sell_df)} 檔")
         display_table_with_button_t3(st.session_state.t3_sell_df.sort_values(by=col_sell, ascending=False).head(999 if show_full_t3 else 10), "t3_sell")
 
 # ==========================================
