@@ -30,78 +30,13 @@ except ImportError:
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="stock-radar", layout="wide")
-st.markdown("""
-<style>
-#MainMenu {visibility: hidden;}
-footer {visibility: hidden;}
-
-/* ── 浮動快速導航列 ── */
-#float-nav {
-    position: fixed;
-    bottom: 20px;
-    right: 16px;
-    z-index: 9999;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    align-items: flex-end;
-}
-.fnav-btn {
-    background: rgba(30, 35, 55, 0.92);
-    border: 1px solid #3a3f5c;
-    color: #d1d4dc;
-    border-radius: 20px;
-    padding: 6px 14px;
-    font-size: 13px;
-    cursor: pointer;
-    white-space: nowrap;
-    backdrop-filter: blur(6px);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-    transition: all 0.15s;
-}
-.fnav-btn:hover {
-    background: #2962FF;
-    border-color: #2962FF;
-    color: white;
-}
-.fnav-btn.active-tab {
-    background: #2962FF;
-    border-color: #2962FF;
-    color: white;
-}
-</style>
-
-<div id="float-nav">
-    <button class="fnav-btn" onclick="switchTab(0)" title="特定分點">🚀</button>
-    <button class="fnav-btn" onclick="switchTab(1)" title="股票代號">📊</button>
-    <button class="fnav-btn" onclick="switchTab(2)" title="地緣券商">📍</button>
-    <button class="fnav-btn" onclick="switchTab(3)" title="主力K線圖">📈</button>
-</div>
-
-<script>
-function switchTab(idx) {
-    const tabs = window.parent.document.querySelectorAll('[data-baseweb="tab"]');
-    if (tabs && tabs[idx]) {
-        tabs[idx].click();
-        window.parent.scrollTo({top: 0, behavior: 'smooth'});
-    }
-}
-
-function updateActiveTab() {
-    const tabs = window.parent.document.querySelectorAll('[data-baseweb="tab"]');
-    const btns = document.querySelectorAll('.fnav-btn');
-    tabs.forEach((tab, i) => {
-        if (tab.getAttribute('aria-selected') === 'true') {
-            btns.forEach(b => b.classList.remove('active-tab'));
-            if (btns[i]) btns[i].classList.add('active-tab');
-        }
-    });
-}
-
-setInterval(updateActiveTab, 1000);
-updateActiveTab();
-</script>
-""", unsafe_allow_html=True)
+hide_streamlit_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            </style>
+            """
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 # ==========================================
 # 👤 Users 分頁：email 帳號系統
