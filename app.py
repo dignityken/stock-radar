@@ -30,7 +30,8 @@ except ImportError:
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="stock-radar", layout="wide")
-hide_streamlit_style = """
+
+hst.markdown("""
 <style>
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
@@ -58,8 +59,6 @@ footer {visibility: hidden;}
     backdrop-filter: blur(6px);
     box-shadow: 0 2px 8px rgba(0,0,0,0.4);
     transition: all 0.15s;
-    text-decoration: none;
-    display: inline-block;
 }
 .fnav-btn:hover {
     background: #2962FF;
@@ -82,16 +81,13 @@ footer {visibility: hidden;}
 
 <script>
 function switchTab(idx) {
-    // 找到所有 tab 按鈕並點擊對應的
     const tabs = window.parent.document.querySelectorAll('[data-baseweb="tab"]');
     if (tabs && tabs[idx]) {
         tabs[idx].click();
-        // 跳到頁面頂部
         window.parent.scrollTo({top: 0, behavior: 'smooth'});
     }
 }
 
-// 高亮目前所在的 tab
 function updateActiveTab() {
     const tabs = window.parent.document.querySelectorAll('[data-baseweb="tab"]');
     const btns = document.querySelectorAll('.fnav-btn');
@@ -103,11 +99,10 @@ function updateActiveTab() {
     });
 }
 
-// 每秒檢查一次目前 tab（輕量輪詢）
 setInterval(updateActiveTab, 1000);
 updateActiveTab();
 </script>
-"""
+""", unsafe_allow_html=True)
 
 # ==========================================
 # 👤 Users 分頁：email 帳號系統
