@@ -31,12 +31,83 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="stock-radar", layout="wide")
 hide_streamlit_style = """
-            <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            </style>
-            """
-st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+<style>
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+
+/* ── 浮動快速導航列 ── */
+#float-nav {
+    position: fixed;
+    bottom: 20px;
+    right: 16px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-end;
+}
+.fnav-btn {
+    background: rgba(30, 35, 55, 0.92);
+    border: 1px solid #3a3f5c;
+    color: #d1d4dc;
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+    backdrop-filter: blur(6px);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    transition: all 0.15s;
+    text-decoration: none;
+    display: inline-block;
+}
+.fnav-btn:hover {
+    background: #2962FF;
+    border-color: #2962FF;
+    color: white;
+}
+.fnav-btn.active-tab {
+    background: #2962FF;
+    border-color: #2962FF;
+    color: white;
+}
+</style>
+
+<div id="float-nav">
+    <button class="fnav-btn" onclick="switchTab(0)" title="特定分點">🚀</button>
+    <button class="fnav-btn" onclick="switchTab(1)" title="股票代號">📊</button>
+    <button class="fnav-btn" onclick="switchTab(2)" title="地緣券商">📍</button>
+    <button class="fnav-btn" onclick="switchTab(3)" title="主力K線圖">📈</button>
+</div>
+
+<script>
+function switchTab(idx) {
+    // 找到所有 tab 按鈕並點擊對應的
+    const tabs = window.parent.document.querySelectorAll('[data-baseweb="tab"]');
+    if (tabs && tabs[idx]) {
+        tabs[idx].click();
+        // 跳到頁面頂部
+        window.parent.scrollTo({top: 0, behavior: 'smooth'});
+    }
+}
+
+// 高亮目前所在的 tab
+function updateActiveTab() {
+    const tabs = window.parent.document.querySelectorAll('[data-baseweb="tab"]');
+    const btns = document.querySelectorAll('.fnav-btn');
+    tabs.forEach((tab, i) => {
+        if (tab.getAttribute('aria-selected') === 'true') {
+            btns.forEach(b => b.classList.remove('active-tab'));
+            if (btns[i]) btns[i].classList.add('active-tab');
+        }
+    });
+}
+
+// 每秒檢查一次目前 tab（輕量輪詢）
+setInterval(updateActiveTab, 1000);
+updateActiveTab();
+</script>
+"""
 
 # ==========================================
 # 👤 Users 分頁：email 帳號系統
