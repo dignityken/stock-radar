@@ -30,7 +30,6 @@ except ImportError:
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="stock-radar", layout="wide")
-
 hst.markdown("""
 <style>
 #MainMenu {visibility: hidden;}
