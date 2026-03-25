@@ -475,7 +475,7 @@ def get_stock_kline(stock_id):
     return pd.DataFrame()
 
 @st.cache_data(ttl=1800)
-def get_fubon_history_and_name(sid, br_id):
+def get_history_and_name(sid, br_id):
     today_str = datetime.date.today().strftime('%Y-%m-%d')
     url_history = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?A={sid}&BHID={br_id}&b={br_id}&C=3&D=1999-1-1&E={today_str}&ver=V3"
     try:
@@ -1144,7 +1144,7 @@ with tab4:
                 if df_k.empty: 
                     st.error("找不到 K 線資料。")
                 else:
-                    df_broker, stock_name = get_fubon_history_and_name(drawn_sid_clean, drawn_br_id)
+                    df_broker, stock_name = get_history_and_name(drawn_sid_clean, drawn_br_id)
                     
                     if df_broker.empty:
                         st.info("近期無交易紀錄。")
