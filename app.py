@@ -137,24 +137,33 @@ def check_password():
         st.markdown('<div class="login-title">📡 stock-radar</div>', unsafe_allow_html=True)
         st.markdown('<div class="login-sub">分點追蹤平台</div>', unsafe_allow_html=True)
         login_status = st.session_state.get("login_status", "")
-        email_input = st.text_input("Email", placeholder="your@email.com", key="login_email", autocomplete="email")
-        pw_input = st.text_input("密碼", type="password", placeholder="輸入密碼", key="login_pw", autocomplete="current-password")
-        if st.button("🔐 登入", use_container_width=True, type="primary"):
-            if email_input and pw_input:
-                success, username, msg = verify_email_login(email_input, pw_input)
-                if success:
-                    st.session_state["password_correct"] = True
-                    st.session_state["username"] = username
-                    st.session_state["user_token"] = email_input
-                    st.session_state["login_method"] = "email"
-                    st.session_state["login_status"] = ""
-                    st.rerun()
+        
+        # --- 修改開始：利用 st.form 解決瀏覽器記憶密碼抓不到值的問題 ---
+        with st.form("login_form"):
+            email_input = st.text_input("Email", placeholder="your@email.com", autocomplete="username")
+            pw_input = st.text_input("密碼", type="password", placeholder="輸入密碼", autocomplete="current-password")
+            
+            # form_submit_button 會強制一次性收集表單內的所有資料
+            submit_btn = st.form_submit_button("🔐 登入", use_container_width=True, type="primary")
+            
+            if submit_btn:
+                if email_input and pw_input:
+                    success, username, msg = verify_email_login(email_input, pw_input)
+                    if success:
+                        st.session_state["password_correct"] = True
+                        st.session_state["username"] = username
+                        st.session_state["user_token"] = email_input
+                        st.session_state["login_method"] = "email"
+                        st.session_state["login_status"] = ""
+                        st.rerun()
+                    else:
+                        st.session_state["login_status"] = msg
+                        st.rerun()
                 else:
-                    st.session_state["login_status"] = msg
+                    st.session_state["login_status"] = "請輸入 Email 和密碼"
                     st.rerun()
-            else:
-                st.session_state["login_status"] = "請輸入 Email 和密碼"
-                st.rerun()
+        # --- 修改結束 ---
+
         if login_status and "OK" not in login_status:
             st.error(login_status)
         st.markdown('<div class="login-divider">── 或使用舊版通行密碼 ──</div>', unsafe_allow_html=True)
