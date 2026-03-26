@@ -935,25 +935,30 @@ elif cur_page == PAGE_T4:
     t4_sid_clean = t4_sid.strip().upper()
 
     if fav_btn:
-        # 利用既有的爬蟲函數，順便抓取股票名稱 (若剛剛有繪圖，會有快取，速度會是一瞬間)
         t4_br_id = BROKER_MAP[t4_br_name]['br_id']
         _, s_name = get_history_and_name(t4_sid_clean, t4_br_id)
         if not s_name: s_name = ""
 
-        # 檢查是否已存在 (只比對代號和分點)
         exists = False
         for item in st.session_state.watchlist:
             if item.get("股票代號") == t4_sid_clean and item.get("追蹤分點") == t4_br_name:
                 exists = True
-                # 若舊紀錄沒有名稱，順便幫它補上並更新到雲端
+                updated = False
+                # 若舊紀錄沒有名稱或筆記，順便補上並更新
                 if not item.get("股票名稱"):
                     item["股票名稱"] = s_name
+                    updated = True
+                if "筆記" not in item:
+                    item["筆記"] = ""
+                    updated = True
+                    
+                if updated:
                     save_gsheet_watchlist(current_user, st.session_state.watchlist)
                 break
 
         if not exists:
-            # 存入時，新增 "股票名稱" 欄位
-            entry = {"股票代號": t4_sid_clean, "股票名稱": s_name, "追蹤分點": t4_br_name}
+            # 存入時，新增 "股票名稱" 與 "筆記" 欄位
+            entry = {"股票代號": t4_sid_clean, "股票名稱": s_name, "追蹤分點": t4_br_name, "筆記": ""}
             st.session_state.watchlist.append(entry)
             success, msg = save_gsheet_watchlist(current_user, st.session_state.watchlist)
             if success: st.success(f"✅ 已存入【{current_user}】專屬雲端清單！")
@@ -985,25 +990,49 @@ elif cur_page == PAGE_T4:
         with st.expander(f"⭐ 【{current_user}】的專屬主力清單", expanded=False):
             if 'wl_refresh_key' not in st.session_state: st.session_state.wl_refresh_key = 0
             
-            # 確保所有舊紀錄都有 "股票名稱" 這個 key，避免 DataFrame 出錯
+            # 確保所有舊紀錄都有 "股票名稱" 與 "筆記" 這個 key
             for item in st.session_state.watchlist:
-                if "股票名稱" not in item:
-                    item["股票名稱"] = ""
+                if "股票名稱" not in item: item["股票名稱"] = ""
+                if "筆記" not in item: item["筆記"] = ""
                     
             wl_df = pd.DataFrame(st.session_state.watchlist)
             wl_df.insert(0, '載入', False)
             wl_df['刪除'] = False
             
-            # 重新排列欄位順序，讓名稱顯示在代號旁邊
-            cols = ['載入', '股票代號', '股票名稱', '追蹤分點', '刪除']
+            # 重新排列欄位順序，加入筆記欄位
+            cols = ['載入', '股票代號', '股票名稱', '追蹤分點', '筆記', '刪除']
             wl_df = wl_df[[c for c in cols if c in wl_df.columns]]
             
-            wl_config = {"載入": st.column_config.CheckboxColumn("載入繪圖"), "刪除": st.column_config.CheckboxColumn("刪除")}
+            # UI 欄位設定：將代號、名稱、分點鎖定唯讀，並美化筆記欄位
+            wl_config = {
+                "載入": st.column_config.CheckboxColumn("載入繪圖"), 
+                "刪除": st.column_config.CheckboxColumn("刪除"),
+                "股票代號": st.column_config.TextColumn(disabled=True),
+                "股票名稱": st.column_config.TextColumn(disabled=True),
+                "追蹤分點": st.column_config.TextColumn(disabled=True),
+                "筆記": st.column_config.TextColumn("📝 筆記 (點擊編輯)", help="在此輸入券商特性，按 Enter 自動存檔")
+            }
+            
             editor_key = f"wl_editor_{st.session_state.wl_refresh_key}"
             st.data_editor(wl_df, hide_index=True, column_config=wl_config, width="stretch", key=editor_key)
+            
             if editor_key in st.session_state:
                 edits = st.session_state[editor_key].get('edited_rows', {})
                 action_taken = False
+                note_edited = False
+                
+                # 步驟 1：先檢查有沒有人編輯「筆記」，有的話就更新到記憶體並標記
+                for row_idx, changes in edits.items():
+                    if '筆記' in changes:
+                        st.session_state.watchlist[row_idx]['筆記'] = changes['筆記']
+                        note_edited = True
+                
+                # 步驟 2：如果筆記有變動，背景默默上傳 Google Sheets (不觸發 rerun 導致畫面閃爍)
+                if note_edited:
+                    success, msg = save_gsheet_watchlist(current_user, st.session_state.watchlist)
+                    if not success: st.error(f"雲端筆記儲存失敗: {msg}")
+
+                # 步驟 3：處理打勾按鈕 (載入或刪除)
                 for row_idx, changes in edits.items():
                     if changes.get('載入', False) == True:
                         st.session_state.t4_target_sid = wl_df.iloc[row_idx]['股票代號']
@@ -1011,6 +1040,7 @@ elif cur_page == PAGE_T4:
                         st.session_state.auto_draw = True
                         st.session_state.chart_render_key += 1
                         action_taken = True; break
+                        
                     if changes.get('刪除', False) == True:
                         del_sid = wl_df.iloc[row_idx]['股票代號']
                         del_br = wl_df.iloc[row_idx]['追蹤分點']
@@ -1018,6 +1048,7 @@ elif cur_page == PAGE_T4:
                         success, msg = save_gsheet_watchlist(current_user, st.session_state.watchlist)
                         if not success: st.error(f"雲端刪除同步失敗: {msg}")
                         action_taken = True; break
+                        
                 if action_taken:
                     st.session_state.wl_refresh_key += 1; st.rerun()
 
