@@ -331,7 +331,18 @@ if 't3_val_loc' not in st.session_state: st.session_state.t3_val_loc = None
 if 't3_val_br' not in st.session_state: st.session_state.t3_val_br = None
 if 't3_last_br' not in st.session_state: st.session_state.t3_last_br = None
 if 't3_last_br_id' not in st.session_state: st.session_state.t3_last_br_id = None
+# === 新增：用來記憶 T1~T3 日期區間的變數 ===
+default_start = datetime.date.today() - datetime.timedelta(days=7)
+default_end = datetime.date.today()
 
+if 't1_val_sd' not in st.session_state: st.session_state.t1_val_sd = default_start
+if 't1_val_ed' not in st.session_state: st.session_state.t1_val_ed = default_end
+
+if 't2_val_sd' not in st.session_state: st.session_state.t2_val_sd = default_start
+if 't2_val_ed' not in st.session_state: st.session_state.t2_val_ed = default_end
+
+if 't3_val_sd' not in st.session_state: st.session_state.t3_val_sd = default_start
+if 't3_val_ed' not in st.session_state: st.session_state.t3_val_ed = default_end
 # ==========================================
 # 資料載入函數
 # ==========================================
@@ -503,8 +514,12 @@ if cur_page == PAGE_T1:
         sel_br_id = b_opts[sel_br_l]
 
     c3, c4, c5 = st.columns(3)
-    with c3: t1_sd = st.date_input("區間起點", datetime.date.today()-datetime.timedelta(days=7), key="t1_sd")
-    with c4: t1_ed = st.date_input("區間終點", datetime.date.today(), key="t1_ed")
+    with c3: 
+        t1_sd = st.date_input("區間起點", value=st.session_state.t1_val_sd, key="t1_sd")
+        st.session_state.t1_val_sd = t1_sd
+    with c4: 
+        t1_ed = st.date_input("區間終點", value=st.session_state.t1_val_ed, key="t1_ed")
+        st.session_state.t1_val_ed = t1_ed
     with c5: t1_u = st.radio("統計單位", ["張數", "金額"], horizontal=True, key="t1_unit")
 
     c6, c7, c8 = st.columns([1.5, 1, 1])
@@ -608,8 +623,12 @@ elif cur_page == PAGE_T2:
     with c1:
         t2_sid = st.text_input("股票代號", value=st.session_state.t2_val_sid, key="t2_s")
         st.session_state.t2_val_sid = t2_sid
-    with c2: t2_sd = st.date_input("開始", datetime.date.today()-datetime.timedelta(days=7), key="t2_sd_in")
-    with c3: t2_ed = st.date_input("結束", datetime.date.today(), key="t2_ed_in")
+    with c2: 
+        t2_sd = st.date_input("開始", value=st.session_state.t2_val_sd, key="t2_sd_in")
+        st.session_state.t2_val_sd = t2_sd
+    with c3: 
+        t2_ed = st.date_input("結束", value=st.session_state.t2_val_ed, key="t2_ed_in")
+        st.session_state.t2_val_ed = t2_ed
 
     c4, c5, c6, c7 = st.columns([2, 1, 1, 1.2])
     with c4: t2_m = st.radio("模式", ["嚴格模式", "濾網模式"], index=1, horizontal=True, key="t2_mode")
@@ -721,8 +740,12 @@ elif cur_page == PAGE_T3:
         sel_t3_br_id = sel_t3_br_info['br_id']
 
     c3, c4, c5 = st.columns(3)
-    with c3: t3_sd = st.date_input("區間起點", datetime.date.today()-datetime.timedelta(days=7), key="t3_sd")
-    with c4: t3_ed = st.date_input("區間終點", datetime.date.today(), key="t3_ed")
+    with c3: 
+        t3_sd = st.date_input("區間起點", value=st.session_state.t3_val_sd, key="t3_sd")
+        st.session_state.t3_val_sd = t3_sd
+    with c4: 
+        t3_ed = st.date_input("區間終點", value=st.session_state.t3_val_ed, key="t3_ed")
+        st.session_state.t3_val_ed = t3_ed
     with c5: t3_u = st.radio("統計單位", ["張數", "金額"], horizontal=True, key="t3_unit")
 
     c6, c7, c8 = st.columns([1.5, 1, 1])
