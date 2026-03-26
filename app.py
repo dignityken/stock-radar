@@ -445,9 +445,8 @@ def calculate_macd(df, fast, slow, signal):
     return macd, sig, hist
 
 @st.cache_data(ttl=3600)
-def get_stock_kline(stock_id):
+def get_stock_kline(stock_id, start_date="2015-01-01"):
     end_date = datetime.date.today() + datetime.timedelta(days=1)
-    start_date = "2000-01-01"
     for suffix in ['.TW', '.TWO']:
         ticker = f"{stock_id}{suffix}"
         df = yf.download(ticker, start=start_date, end=end_date, progress=False, auto_adjust=False)
@@ -460,9 +459,9 @@ def get_stock_kline(stock_id):
     return pd.DataFrame()
 
 @st.cache_data(ttl=1800)
-def get_history_and_name(sid, br_id):
+def get_history_and_name(sid, br_id, start_date="2015-01-01"):
     today_str = datetime.date.today().strftime('%Y-%m-%d')
-    url_history = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?A={sid}&BHID={br_id}&b={br_id}&C=3&D=1999-1-1&E={today_str}&ver=V3"
+    url_history = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?A={sid}&BHID={br_id}&b={br_id}&C=3&D={start_date}&E={today_str}&ver=V3"
     try:
         res_hist = requests.get(url_history, headers=HEADERS, verify=False, timeout=20)
         res_hist.encoding = 'big5'
@@ -1089,20 +1088,23 @@ elif cur_page == PAGE_T4:
         if st.button("📍 地緣券商", use_container_width=True):
             st.session_state.current_page = PAGE_T3; st.rerun()
 
-    # ── 週期 + K棒數 + 水平線 + 工具 ──
-    # 稍微把 c_days 的比例調大一點 (從 1 變成 1.5)，讓下拉選單文字顯示更完整
-    c_per, c_days, c_hval, c_hadd, c_click, c_hclr, c_draw2 = st.columns([2, 1.5, 2, 1, 1, 1, 1])
+    # ── 週期 + K棒數 + 下載範圍 + 水平線 + 工具 ──
+    if 't4_start_year' not in st.session_state: st.session_state.t4_start_year = "2015-01-01"
+    if 'drawn_start_year' not in st.session_state: st.session_state.drawn_start_year = "2015-01-01"
+
+    c_per, c_days, c_start, c_hval, c_hadd, c_click, c_hclr, c_draw2 = st.columns([1.5, 1.5, 1.5, 1.5, 1, 1, 1, 1])
     with c_per:
         t4_period = st.radio("週期", ["日", "週", "月"], horizontal=True, key="t4_period_bot")
     with c_days:
-        # 改成下拉選單 + 自訂輸入框
-        days_mode = st.selectbox("K棒數", [300, 500, 1000, "自訂..."])
+        days_mode = st.selectbox("顯示K棒數", [300, 500, 1000, "自訂..."])
         if days_mode == "自訂...":
-            # 隱藏標題，直接顯示輸入框，並把上限放寬到 5000
-            t4_days = st.number_input("自訂K棒數", value=st.session_state.drawn_days, min_value=10, max_value=5000, label_visibility="collapsed")
+            t4_days = st.number_input("自訂K棒", value=st.session_state.drawn_days, min_value=10, max_value=5000, label_visibility="collapsed")
         else:
             t4_days = days_mode
-            
+    with c_start:
+        start_opt = st.selectbox("下載範圍", ["2015起 (快)", "2000起 (慢)"], index=0 if st.session_state.t4_start_year=="2015-01-01" else 1)
+        t4_start_val = "2015-01-01" if "2015" in start_opt else "2000-01-01"
+        st.session_state.t4_start_year = t4_start_val
     with c_hval:
         hline_val = st.number_input("📏 水平線", value=0.0, step=1.0, key="hline_val_input")
     with c_hadd:
@@ -1136,8 +1138,9 @@ elif cur_page == PAGE_T4:
     draw_btn = draw_btn or draw_btn2
 
     if st.session_state.get('show_chart', False):
-        if t4_period != st.session_state.get('drawn_period', '日'):
+        if t4_period != st.session_state.get('drawn_period', '日') or t4_start_val != st.session_state.get('drawn_start_year', '2015-01-01'):
             st.session_state.drawn_period = t4_period
+            st.session_state.drawn_start_year = t4_start_val
             st.session_state.chart_render_key += 1
             st.rerun()
 
@@ -1151,6 +1154,7 @@ elif cur_page == PAGE_T4:
         st.session_state.drawn_br_name = t4_br_name
         st.session_state.drawn_period = t4_period
         st.session_state.drawn_days = t4_days
+        st.session_state.drawn_start_year = t4_start_val
 
     if st.session_state.get('show_chart', False):
         drawn_sid_clean = st.session_state.drawn_sid.strip().upper()
@@ -1158,12 +1162,18 @@ elif cur_page == PAGE_T4:
         drawn_br_id = BROKER_MAP[drawn_br_name]['br_id']
         drawn_period = st.session_state.drawn_period
         drawn_days = st.session_state.drawn_days
+        drawn_start_year = st.session_state.drawn_start_year  # <--- 新增這行
 
         with st.spinner(f"為您繪製 {drawn_sid_clean} 中..."):
             try:
-                df_k = get_stock_kline(drawn_sid_clean)
+                # 這裡也要加上 drawn_start_year 傳給函數
+                df_k = get_stock_kline(drawn_sid_clean, drawn_start_year)
                 if df_k.empty:
                     st.error("找不到 K 線資料。")
+                else:
+                    # 這裡也要加上 drawn_start_year 傳給函數
+                    df_broker, stock_name = get_history_and_name(drawn_sid_clean, drawn_br_id, drawn_start_year)
+                    if df_broker.empty: st.info("近期無交易紀錄。")
                 else:
                     df_broker, stock_name = get_history_and_name(drawn_sid_clean, drawn_br_id)
                     if df_broker.empty: st.info("近期無交易紀錄。")
