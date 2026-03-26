@@ -926,8 +926,25 @@ elif cur_page == PAGE_T4:
     t4_sid_clean = t4_sid.strip().upper()
 
     if fav_btn:
-        entry = {"股票代號": t4_sid_clean, "追蹤分點": t4_br_name}
-        if entry not in st.session_state.watchlist:
+        # 利用既有的爬蟲函數，順便抓取股票名稱 (若剛剛有繪圖，會有快取，速度會是一瞬間)
+        t4_br_id = BROKER_MAP[t4_br_name]['br_id']
+        _, s_name = get_history_and_name(t4_sid_clean, t4_br_id)
+        if not s_name: s_name = ""
+
+        # 檢查是否已存在 (只比對代號和分點)
+        exists = False
+        for item in st.session_state.watchlist:
+            if item.get("股票代號") == t4_sid_clean and item.get("追蹤分點") == t4_br_name:
+                exists = True
+                # 若舊紀錄沒有名稱，順便幫它補上並更新到雲端
+                if not item.get("股票名稱"):
+                    item["股票名稱"] = s_name
+                    save_gsheet_watchlist(current_user, st.session_state.watchlist)
+                break
+
+        if not exists:
+            # 存入時，新增 "股票名稱" 欄位
+            entry = {"股票代號": t4_sid_clean, "股票名稱": s_name, "追蹤分點": t4_br_name}
             st.session_state.watchlist.append(entry)
             success, msg = save_gsheet_watchlist(current_user, st.session_state.watchlist)
             if success: st.success(f"✅ 已存入【{current_user}】專屬雲端清單！")
@@ -958,8 +975,20 @@ elif cur_page == PAGE_T4:
     if st.session_state.watchlist:
         with st.expander(f"⭐ 【{current_user}】的專屬主力清單", expanded=False):
             if 'wl_refresh_key' not in st.session_state: st.session_state.wl_refresh_key = 0
+            
+            # 確保所有舊紀錄都有 "股票名稱" 這個 key，避免 DataFrame 出錯
+            for item in st.session_state.watchlist:
+                if "股票名稱" not in item:
+                    item["股票名稱"] = ""
+                    
             wl_df = pd.DataFrame(st.session_state.watchlist)
-            wl_df.insert(0, '載入', False); wl_df['刪除'] = False
+            wl_df.insert(0, '載入', False)
+            wl_df['刪除'] = False
+            
+            # 重新排列欄位順序，讓名稱顯示在代號旁邊
+            cols = ['載入', '股票代號', '股票名稱', '追蹤分點', '刪除']
+            wl_df = wl_df[[c for c in cols if c in wl_df.columns]]
+            
             wl_config = {"載入": st.column_config.CheckboxColumn("載入繪圖"), "刪除": st.column_config.CheckboxColumn("刪除")}
             editor_key = f"wl_editor_{st.session_state.wl_refresh_key}"
             st.data_editor(wl_df, hide_index=True, column_config=wl_config, width="stretch", key=editor_key)
