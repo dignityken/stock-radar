@@ -956,7 +956,7 @@ elif cur_page == PAGE_T4:
             with c_m23: macd2_sig = st.number_input("訊號", value=18, key="m2sig")
 
     if st.session_state.watchlist:
-        with st.expander(f"⭐ 【{current_user}】的專屬主力清單", expanded=True):
+        with st.expander(f"⭐ 【{current_user}】的專屬主力清單", expanded=False):
             if 'wl_refresh_key' not in st.session_state: st.session_state.wl_refresh_key = 0
             wl_df = pd.DataFrame(st.session_state.watchlist)
             wl_df.insert(0, '載入', False); wl_df['刪除'] = False
