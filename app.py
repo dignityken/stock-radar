@@ -1162,21 +1162,19 @@ elif cur_page == PAGE_T4:
         drawn_br_id = BROKER_MAP[drawn_br_name]['br_id']
         drawn_period = st.session_state.drawn_period
         drawn_days = st.session_state.drawn_days
-        drawn_start_year = st.session_state.drawn_start_year  # <--- 新增這行
+        drawn_start_year = st.session_state.drawn_start_year  # <--- 新增這行：讀取範圍
 
         with st.spinner(f"為您繪製 {drawn_sid_clean} 中..."):
             try:
-                # 這裡也要加上 drawn_start_year 傳給函數
+                # ---> 修改這裡：多傳入 drawn_start_year
                 df_k = get_stock_kline(drawn_sid_clean, drawn_start_year)
+                
                 if df_k.empty:
                     st.error("找不到 K 線資料。")
                 else:
-                    # 這裡也要加上 drawn_start_year 傳給函數
+                    # ---> 修改這裡：多傳入 drawn_start_year
                     df_broker, stock_name = get_history_and_name(drawn_sid_clean, drawn_br_id, drawn_start_year)
                     
-                    if df_broker.empty: st.info("近期無交易紀錄。")
-                else:
-                    df_broker, stock_name = get_history_and_name(drawn_sid_clean, drawn_br_id)
                     if df_broker.empty: st.info("近期無交易紀錄。")
                     df_merged = pd.merge(df_k, df_broker[['Date', '買賣超']], on='Date', how='left')
                     df_merged['買賣超'] = df_merged['買賣超'].fillna(0)
