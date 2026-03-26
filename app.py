@@ -1173,6 +1173,7 @@ elif cur_page == PAGE_T4:
                 else:
                     # 這裡也要加上 drawn_start_year 傳給函數
                     df_broker, stock_name = get_history_and_name(drawn_sid_clean, drawn_br_id, drawn_start_year)
+                    
                     if df_broker.empty: st.info("近期無交易紀錄。")
                 else:
                     df_broker, stock_name = get_history_and_name(drawn_sid_clean, drawn_br_id)
