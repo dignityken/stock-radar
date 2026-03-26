@@ -312,7 +312,7 @@ if 'show_chart' not in st.session_state: st.session_state.show_chart = False
 if 'drawn_sid' not in st.session_state: st.session_state.drawn_sid = "6488"
 if 'drawn_br_name' not in st.session_state: st.session_state.drawn_br_name = "兆豐-忠孝"
 if 'drawn_period' not in st.session_state: st.session_state.drawn_period = "日"
-if 'drawn_days' not in st.session_state: st.session_state.drawn_days = 200
+if 'drawn_days' not in st.session_state: st.session_state.drawn_days = 300
 
 if 'watchlist_loaded' not in st.session_state:
     st.session_state.watchlist = load_gsheet_watchlist(current_user)
@@ -1090,11 +1090,19 @@ elif cur_page == PAGE_T4:
             st.session_state.current_page = PAGE_T3; st.rerun()
 
     # ── 週期 + K棒數 + 水平線 + 工具 ──
-    c_per, c_days, c_hval, c_hadd, c_click, c_hclr, c_draw2 = st.columns([2, 1, 2, 1, 1, 1, 1])
+    # 稍微把 c_days 的比例調大一點 (從 1 變成 1.5)，讓下拉選單文字顯示更完整
+    c_per, c_days, c_hval, c_hadd, c_click, c_hclr, c_draw2 = st.columns([2, 1.5, 2, 1, 1, 1, 1])
     with c_per:
         t4_period = st.radio("週期", ["日", "週", "月"], horizontal=True, key="t4_period_bot")
     with c_days:
-        t4_days = st.number_input("K棒數", value=200, min_value=10, max_value=1000)
+        # 改成下拉選單 + 自訂輸入框
+        days_mode = st.selectbox("K棒數", [300, 500, 1000, "自訂..."])
+        if days_mode == "自訂...":
+            # 隱藏標題，直接顯示輸入框，並把上限放寬到 5000
+            t4_days = st.number_input("自訂K棒數", value=st.session_state.drawn_days, min_value=10, max_value=5000, label_visibility="collapsed")
+        else:
+            t4_days = days_mode
+            
     with c_hval:
         hline_val = st.number_input("📏 水平線", value=0.0, step=1.0, key="hline_val_input")
     with c_hadd:
