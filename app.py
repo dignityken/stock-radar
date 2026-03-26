@@ -309,6 +309,20 @@ if 'watchlist_loaded' not in st.session_state:
     st.session_state.watchlist = load_gsheet_watchlist(current_user)
     st.session_state.watchlist_loaded = True
 
+# ── 新增：用來記憶 T1~T3 UI 輸入框與最後查詢狀態的變數 ──
+if 't1_val_hq' not in st.session_state: st.session_state.t1_val_hq = None
+if 't1_val_br' not in st.session_state: st.session_state.t1_val_br = None
+if 't1_last_br' not in st.session_state: st.session_state.t1_last_br = None
+if 't1_last_br_id' not in st.session_state: st.session_state.t1_last_br_id = None
+
+if 't2_val_sid' not in st.session_state: st.session_state.t2_val_sid = "2408"
+if 't2_last_sid' not in st.session_state: st.session_state.t2_last_sid = "2408"
+
+if 't3_val_loc' not in st.session_state: st.session_state.t3_val_loc = None
+if 't3_val_br' not in st.session_state: st.session_state.t3_val_br = None
+if 't3_last_br' not in st.session_state: st.session_state.t3_last_br = None
+if 't3_last_br_id' not in st.session_state: st.session_state.t3_last_br_id = None
+
 # ==========================================
 # 資料載入函數
 # ==========================================
@@ -468,10 +482,15 @@ if cur_page == PAGE_T1:
     c1, c2 = st.columns(2)
     with c1:
         sorted_hq_keys = sorted(UI_TREE.keys())
-        sel_hq = st.selectbox("選擇券商", sorted_hq_keys, key="t1_b_sel")
+        idx_hq = sorted_hq_keys.index(st.session_state.t1_val_hq) if st.session_state.t1_val_hq in sorted_hq_keys else 0
+        sel_hq = st.selectbox("選擇券商", sorted_hq_keys, index=idx_hq, key="t1_b_sel")
+        st.session_state.t1_val_hq = sel_hq
     with c2:
         b_opts = UI_TREE[sel_hq]['branches']
-        sel_br_l = st.selectbox("選擇分點", sorted(b_opts.keys()), key="t1_br_sel")
+        sorted_br_keys = sorted(b_opts.keys())
+        idx_br = sorted_br_keys.index(st.session_state.t1_val_br) if st.session_state.t1_val_br in sorted_br_keys else 0
+        sel_br_l = st.selectbox("選擇分點", sorted_br_keys, index=idx_br, key="t1_br_sel")
+        st.session_state.t1_val_br = sel_br_l
         sel_br_id = b_opts[sel_br_l]
 
     c3, c4, c5 = st.columns(3)
@@ -486,6 +505,9 @@ if cur_page == PAGE_T1:
 
     if st.button("開始分點尋寶 🚀", key="t1_go"):
         st.session_state.t1_searched = True
+        st.session_state.t1_last_br = sel_br_l
+        st.session_state.t1_last_br_id = sel_br_id
+        
         sd_s, ed_s = t1_sd.strftime('%Y-%m-%d'), t1_ed.strftime('%Y-%m-%d')
         bid_hq = UI_TREE[sel_hq]['bid']
         c_param = "B" if '金額' in t1_u else "E"
@@ -536,7 +558,7 @@ if cur_page == PAGE_T1:
                 df_show = df_to_show.copy()
                 df_show['extracted_stock_id'] = df_show['股票名稱'].apply(get_stock_id)
                 df_show['K線圖'] = df_show['extracted_stock_id'].apply(lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zcw/zcw1_{sid}.djhtm" if sid else "")
-                df_show['分點明細'] = df_show['extracted_stock_id'].apply(lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={sid}&BHID={sel_br_id}&b={sel_br_id}&C=3" if sid else "")
+                df_show['分點明細'] = df_show['extracted_stock_id'].apply(lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={sid}&BHID={st.session_state.t1_last_br_id}&b={st.session_state.t1_last_br_id}&C=3" if sid else "")
                 df_show['📊 K線圖'] = False
                 col_buy_name = '買進金額' if '金額' in t1_u else '買進張數'
                 col_sell_name = '賣出金額' if '金額' in t1_u else '賣出張數'
@@ -555,7 +577,7 @@ if cur_page == PAGE_T1:
                         if changes.get('📊 K線圖', False) == True:
                             sid_clicked = df_show.iloc[row_idx]['extracted_stock_id']
                             st.session_state.t4_target_sid = sid_clicked
-                            st.session_state.t4_target_br = sel_br_l
+                            st.session_state.t4_target_br = st.session_state.t1_last_br
                             st.session_state.auto_draw = True
                             st.session_state.table_refresh_key += 1
                             st.session_state.current_page = PAGE_T4
@@ -574,7 +596,9 @@ if cur_page == PAGE_T1:
 elif cur_page == PAGE_T2:
     st.markdown("### 📊 股票代號 — 誰在買賣這檔股票？")
     c1, c2, c3 = st.columns(3)
-    with c1: t2_sid = st.text_input("股票代號", "2408", key="t2_s")
+    with c1:
+        t2_sid = st.text_input("股票代號", value=st.session_state.t2_val_sid, key="t2_s")
+        st.session_state.t2_val_sid = t2_sid
     with c2: t2_sd = st.date_input("開始", datetime.date.today()-datetime.timedelta(days=7), key="t2_sd_in")
     with c3: t2_ed = st.date_input("結束", datetime.date.today(), key="t2_ed_in")
 
@@ -586,6 +610,8 @@ elif cur_page == PAGE_T2:
 
     if st.button("開始籌碼追蹤 🚀", key="t2_btn"):
         t2_sid_clean = t2_sid.strip().replace(" ", "").upper()
+        st.session_state.t2_last_sid = t2_sid_clean
+        
         if not t2_sid_clean.isalnum():
             st.error("股票代號必須是字母數字組合。")
         else:
@@ -617,7 +643,8 @@ elif cur_page == PAGE_T2:
             except Exception as e: st.error(f"發生錯誤: {e}")
 
     if st.session_state.get('t2_buy_df') is not None and not st.session_state.t2_buy_df.empty:
-        t2_sid_clean = t2_sid.strip().replace(" ", "").upper()
+        # 強制使用最後一次成功搜尋的代號，避免使用者亂改框內文字影響連結與跳轉
+        t2_sid_clean = st.session_state.t2_last_sid 
 
         def get_link_t2(broker_name):
             name_cleaned = broker_name.replace("亞","亞").strip()
@@ -645,7 +672,7 @@ elif cur_page == PAGE_T2:
                     for row_idx, changes in edits.items():
                         if changes.get('📊 K線圖', False) == True:
                             br_clicked = df_show.iloc[row_idx]['券商']
-                            st.session_state.t4_target_sid = t2_sid_clean
+                            st.session_state.t4_target_sid = st.session_state.t2_last_sid
                             clean_br = br_clicked.replace("亚","亞").strip()
                             matched_br = clean_br if clean_br in BROKER_MAP else next((k for k in BROKER_MAP if clean_br in k or k in clean_br), None)
                             if matched_br: st.session_state.t4_target_br = matched_br
@@ -668,12 +695,18 @@ elif cur_page == PAGE_T3:
     c1, c2 = st.columns(2)
     with c1:
         sorted_loc_keys = sorted(GEO_MAP.keys())
-        default_loc_idx = sorted_loc_keys.index('城中') if '城中' in sorted_loc_keys else 0
-        sel_loc = st.selectbox("選擇地緣關鍵字", sorted_loc_keys, index=default_loc_idx, key="t3_loc_sel")
+        if st.session_state.t3_val_loc is None and '城中' in sorted_loc_keys:
+            st.session_state.t3_val_loc = '城中'
+        idx_loc = sorted_loc_keys.index(st.session_state.t3_val_loc) if st.session_state.t3_val_loc in sorted_loc_keys else 0
+        sel_loc = st.selectbox("選擇地緣關鍵字", sorted_loc_keys, index=idx_loc, key="t3_loc_sel")
+        st.session_state.t3_val_loc = sel_loc
     with c2:
         loc_branches = GEO_MAP[sel_loc]
         sorted_loc_br_keys = sorted(loc_branches.keys())
-        sel_t3_br_l = st.selectbox("選擇該區特定分點", sorted_loc_br_keys, key=f"t3_br_sel_{sel_loc}")
+        idx_loc_br = sorted_loc_br_keys.index(st.session_state.t3_val_br) if st.session_state.t3_val_br in sorted_loc_br_keys else 0
+        sel_t3_br_l = st.selectbox("選擇該區特定分點", sorted_loc_br_keys, index=idx_loc_br, key=f"t3_br_sel_{sel_loc}")
+        st.session_state.t3_val_br = sel_t3_br_l
+        
         sel_t3_br_info = loc_branches[sel_t3_br_l]
         sel_t3_hq_id = sel_t3_br_info['hq_id']
         sel_t3_br_id = sel_t3_br_info['br_id']
@@ -689,6 +722,9 @@ elif cur_page == PAGE_T3:
     with c8: st.write(""); show_full_t3 = st.checkbox("顯示完整清單", value=False, key="t3_full")
 
     if st.button("啟動地緣雷達 📡", key="t3_go"):
+        st.session_state.t3_last_br = sel_t3_br_l
+        st.session_state.t3_last_br_id = sel_t3_br_id
+        
         sd_s, ed_s = t3_sd.strftime('%Y-%m-%d'), t3_ed.strftime('%Y-%m-%d')
         is_amount = '金額' in t3_u
         c_param = "B" if is_amount else "E"
@@ -747,7 +783,7 @@ elif cur_page == PAGE_T3:
                 df_show = df_to_show.copy()
                 df_show['extracted_stock_id'] = df_show['股票名稱'].apply(get_stock_id)
                 df_show['K線圖'] = df_show['extracted_stock_id'].apply(lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zcw/zcw1_{sid}.djhtm" if sid else "")
-                df_show['分點明細'] = df_show['extracted_stock_id'].apply(lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={sid}&BHID={sel_t3_br_id}&b={sel_t3_br_id}&C=3" if sid else "")
+                df_show['分點明細'] = df_show['extracted_stock_id'].apply(lambda sid: f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?a={sid}&BHID={st.session_state.t3_last_br_id}&b={st.session_state.t3_last_br_id}&C=3" if sid else "")
                 df_show['📊 K線圖'] = False
                 df_show = df_show[['📊 K線圖', '股票名稱', 'K線圖', col_buy, col_sell, '總額', '買%', '賣%', '分點明細', 'extracted_stock_id']]
                 col_config = {
@@ -764,14 +800,14 @@ elif cur_page == PAGE_T3:
                         if changes.get('📊 K線圖', False) == True:
                             sid_clicked = df_show.iloc[row_idx]['extracted_stock_id']
                             st.session_state.t4_target_sid = sid_clicked
-                            st.session_state.t4_target_br = sel_t3_br_l
+                            st.session_state.t4_target_br = st.session_state.t3_last_br
                             st.session_state.auto_draw = True
                             st.session_state.table_refresh_key += 1
                             st.session_state.current_page = PAGE_T4
                             st.rerun()
 
         sd_s, ed_s = t3_sd.strftime('%Y-%m-%d'), t3_ed.strftime('%Y-%m-%d')
-        st.subheader(f"🕵️ 地緣雷達結果：{sel_t3_br_l}")
+        st.subheader(f"🕵️ 地緣雷達結果：{st.session_state.t3_last_br}")
         st.caption(f"📌 區間：{sd_s} ~ {ed_s} | 單位：{t3_u}")
         st.markdown(f"### 🔴 該分點買進 - 共 {len(st.session_state.t3_buy_df)} 檔")
         display_table_with_button_t3(st.session_state.t3_buy_df.sort_values(by=col_buy, ascending=False).head(999 if show_full_t3 else 10), "t3_buy")
@@ -1187,7 +1223,7 @@ elif cur_page == PAGE_T4:
         }});
 
         mobileDrawBtn.addEventListener('click',()=>{{
-            if(!lastCrosshairParam||!lastCrosshairParam.time||lastCrosshairParam.point===undefined||lastCrosshairParam.point.y<0){{alert('請先觸碰圖表，將十字線移動到指定的 K 棒上！');return;}}
+            if(!lastCrosshairParam||lastCrosshairParam.time===undefined||lastCrosshairParam.point===undefined||lastCrosshairParam.point.y<0){{alert('請先觸碰圖表，將十字線移動到指定的 K 棒上！');return;}}
             let timeStr=lastCrosshairParam.time;
             if(typeof timeStr==='object'&&timeStr.year)timeStr=timeStr.year+'-'+String(timeStr.month).padStart(2,'0')+'-'+String(timeStr.day).padStart(2,'0');
             const d=dictByTime[timeStr]||dictByTime[lastCrosshairParam.time];if(!d)return;
