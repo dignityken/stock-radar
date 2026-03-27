@@ -873,7 +873,7 @@ elif cur_page == PAGE_T4:
                 if prev_top_date is not None and prev_top_dif>0:
                     markers_macd.append({"time":prev_top_date,"position":"aboveBar","color":"#FFD600","shape":"text","text":f"{prev_top_dif:.2f}","size":1})
                 if cur_top_dif>0 and prev_top_dif>0 and cur_top_dif<prev_top_dif and cur_wave_high>=prev_top_close and prev_top_date is not None:
-                    lbl="价同" if cur_wave_high==prev_top_close else "价破"
+                    lbl="价同" if cur_wave_high==prev_top_close else "價破"
                     markers_price.append({"time":prev_top_date,"position":"aboveBar","color":"#ef5350","shape":"arrowDown","text":f"M{prefix}\n{lbl}\n{prev_top_close:.2f}","price":prev_top_close})
                 if cur_top_dif>0:
                     prev_top_dif=cur_top_dif; prev_top_date=cur_top_date; prev_top_close=cur_top_close
@@ -891,7 +891,7 @@ elif cur_page == PAGE_T4:
                 if prev_bot_date is not None and prev_bot_dif<0:
                     markers_macd.append({"time":prev_bot_date,"position":"belowBar","color":"#00E676","shape":"text","text":f"{prev_bot_dif:.2f}","size":1})
                 if cur_bot_dif<0 and prev_bot_dif<0 and cur_bot_dif>prev_bot_dif and cur_wave_low<=prev_bot_close and prev_bot_date is not None:
-                    lbl="价同" if cur_wave_low==prev_bot_close else "价破"
+                    lbl="价同" if cur_wave_low==prev_bot_close else "價破"
                     markers_price.append({"time":prev_bot_date,"position":"belowBar","color":"#26a69a","shape":"arrowUp","text":f"W{prefix}\n{lbl}\n{prev_bot_close:.2f}","price":prev_bot_close})
                 if cur_bot_dif<0:
                     prev_bot_dif=cur_bot_dif; prev_bot_date=cur_bot_date; prev_bot_close=cur_bot_close
@@ -904,13 +904,13 @@ elif cur_page == PAGE_T4:
                     if prev_top_date is not None:
                         markers_macd.append({"time":prev_top_date,"position":"aboveBar","color":"#FFD600","shape":"text","text":f"{prev_top_dif:.2f}","size":1})
                     if cur_top_dif<prev_top_dif and cur_wave_high>=prev_top_close and prev_top_date is not None:
-                        lbl="价同" if cur_wave_high==prev_top_close else "价破"
+                        lbl="价同" if cur_wave_high==prev_top_close else "價破"
                         markers_price.append({"time":prev_top_date,"position":"aboveBar","color":"#ef5350","shape":"arrowDown","text":f"未M{prefix}\n{lbl}\n{prev_top_close:.2f}","price":prev_top_close})
                 if hist<0 and cur_bot_dif<0 and prev_bot_dif<0:
                     if prev_bot_date is not None:
                         markers_macd.append({"time":prev_bot_date,"position":"belowBar","color":"#00E676","shape":"text","text":f"{prev_bot_dif:.2f}","size":1})
                     if cur_bot_dif>prev_bot_dif and cur_wave_low<=prev_bot_close and prev_bot_date is not None:
-                        lbl="价同" if cur_wave_low==prev_bot_close else "价破"
+                        lbl="价同" if cur_wave_low==prev_bot_close else "價破"
                         markers_price.append({"time":prev_bot_date,"position":"belowBar","color":"#26a69a","shape":"arrowUp","text":f"未W{prefix}\n{lbl}\n{prev_bot_close:.2f}","price":prev_bot_close})
 
         def dedup(lst):
