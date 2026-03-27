@@ -1223,7 +1223,7 @@ elif cur_page == PAGE_T4:
     <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
     <style>
         body{{margin:0;padding:0;background-color:#131722;overflow:hidden;font-family:"Microsoft JhengHei",sans-serif;}}
-        #wrapper{{position:relative;width:calc(100vw - 24px);height:95vh;}}
+        #wrapper{{position:relative;width:calc(100vw - 50px);height:95vh;}}
         #chart{{width:100%;height:100%;}}
         .tv-legend{{position:absolute;left:12px;top:12px;z-index:999;font-size:13px;color:#d1d4dc;pointer-events:none;background:rgba(19,23,34,0.85);padding:8px 12px;border-radius:6px;border:1px solid #363c4e;box-shadow:0 4px 12px rgba(0,0,0,0.5);}}
         .lg-title{{color:#2962FF;font-weight:bold;font-size:15px;margin-bottom:6px;border-bottom:1px solid #444;padding-bottom:4px;}}
