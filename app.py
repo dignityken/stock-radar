@@ -333,7 +333,7 @@ with st.sidebar:
                 scan_show = scan_show[display_cols].reset_index(drop=True).copy()
                 scan_show.insert(0, "📊", False)
 
-                scan_editor_key = f"scan_editor_{st.session_state.table_refresh_key}"
+                scan_editor_key = f"scan_editor_{st.session_state.get('table_refresh_key', 0)}"
                 st.data_editor(
                     scan_show,
                     hide_index=True,
