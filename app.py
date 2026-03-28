@@ -349,9 +349,9 @@ with st.sidebar:
                             sid = str(row.get("股票代號", "")).strip()
                             br  = str(row.get("分點名稱", "")).strip()
                             if sid and br:
-                                # 只記錄待處理的跳轉，實際比對在頁面渲染區執行
                                 st.session_state["vip_pending_sid"] = sid
                                 st.session_state["vip_pending_br"]  = br
+                                st.session_state.table_refresh_key += 1
                                 st.session_state.current_page = PAGE_T4
                                 st.rerun()
 
@@ -923,7 +923,6 @@ elif cur_page == PAGE_T4:
         if matched_br:
             st.session_state.t4_target_br = matched_br
         st.session_state.auto_draw = True
-        st.session_state.table_refresh_key += 1
         st.rerun()
 
     def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
