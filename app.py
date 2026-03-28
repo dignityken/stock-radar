@@ -333,15 +333,16 @@ with st.sidebar:
                 scan_show = scan_show[display_cols].copy()
                 scan_show.insert(0, "📊", False)
 
+                scan_editor_key = f"scan_editor_{st.session_state.table_refresh_key}"
                 edited = st.data_editor(
                     scan_show,
                     hide_index=True,
                     column_config={"📊": st.column_config.CheckboxColumn("載入K線")},
                     use_container_width=True,
-                    key="scan_editor"
+                    key=scan_editor_key
                 )
-                if "scan_editor" in st.session_state:
-                    edits = st.session_state["scan_editor"].get("edited_rows", {})
+                if scan_editor_key in st.session_state:
+                    edits = st.session_state[scan_editor_key].get("edited_rows", {})
                     for row_idx, changes in edits.items():
                         if changes.get("📊", False):
                             row = scan_show.iloc[row_idx]
@@ -923,6 +924,7 @@ elif cur_page == PAGE_T4:
             st.session_state.t4_target_br = matched_br
         st.session_state.auto_draw = True
         st.session_state.table_refresh_key += 1
+        st.rerun()
 
     def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
         markers_price = []; markers_macd = []
