@@ -347,10 +347,11 @@ with st.sidebar:
                             row = scan_show.iloc[row_idx]
                             sid = str(row.get("股票代號", "")).strip()
                             br  = str(row.get("分點名稱", "")).strip()
-                            if sid:
+                            if sid and br:
                                 st.session_state.t4_target_sid = sid
                                 st.session_state.t4_target_br  = br
                                 st.session_state.auto_draw = True
+                                st.session_state.table_refresh_key += 1
                                 st.session_state.current_page = PAGE_T4
                                 st.rerun()
 
@@ -1005,11 +1006,6 @@ elif cur_page == PAGE_T4:
     with c_br:
         all_br_names = sorted(list(BROKER_MAP.keys()))
         t4_br_val = st.session_state.get('t4_target_br', '兆豐-忠孝')
-        # 若直接找不到，嘗試模糊比對（來自VIP清單的分點名稱）
-        if t4_br_val not in all_br_names:
-            matched = next((k for k in all_br_names if t4_br_val in k or k in t4_br_val), '兆豐-忠孝')
-            t4_br_val = matched
-            st.session_state.t4_target_br = matched
         idx = all_br_names.index(t4_br_val) if t4_br_val in all_br_names else 0
         t4_br_name = st.selectbox("搜尋分點", all_br_names, index=idx)
     with c_draw:
