@@ -51,18 +51,18 @@ def get_users_sheet():
         try:
             ws = doc.worksheet("Users")
         except gspread.exceptions.WorksheetNotFound:
-            ws = doc.add_worksheet(title="Users", rows="500", cols="5")
-            ws.append_row(["email", "password_hash", "username", "status", "expire_date"])
+            ws = doc.add_worksheet(title="Users", rows="500", cols="6")
+            ws.append_row(["email", "password_hash", "username", "status", "expire_date", "role"])
         return ws
     except Exception:
         return None
 
 def verify_email_login(email, password):
     if not BCRYPT_AVAILABLE:
-        return False, "", "伺服器未安裝 bcrypt 套件"
+        return False, "", "伺服器未安裝 bcrypt 套件", ""
     ws = get_users_sheet()
     if not ws:
-        return False, "", "無法連線用戶資料庫"
+        return False, "", "無法連線用戶資料庫", ""
     try:
         records = ws.get_all_records()
         email_lower = email.strip().lower()
@@ -70,23 +70,24 @@ def verify_email_login(email, password):
             if str(row.get("email", "")).strip().lower() == email_lower:
                 status = str(row.get("status", "")).strip().lower()
                 if status == "pending":
-                    return False, "", "⏳ 帳號審核中，請等待管理員開通。"
+                    return False, "", "⏳ 帳號審核中，請等待管理員開通。", ""
                 if status != "active":
-                    return False, "", "🚫 帳號已停用，請洽管理員。"
+                    return False, "", "🚫 帳號已停用，請洽管理員。", ""
                 exp_str = str(row.get("expire_date", "2099-12-31")).strip()
                 try:
                     if datetime.date.today() > datetime.datetime.strptime(exp_str, "%Y-%m-%d").date():
-                        return False, "", "⚠️ 帳號已到期，請洽管理員續期。"
+                        return False, "", "⚠️ 帳號已到期，請洽管理員續期。", ""
                 except: pass
                 stored_hash = str(row.get("password_hash", "")).strip()
                 if bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8")):
                     username = str(row.get("username", email)).strip()
-                    return True, username, "OK"
+                    role = str(row.get("role", "member")).strip().lower()
+                    return True, username, "OK", role
                 else:
-                    return False, "", "🚫 密碼錯誤"
-        return False, "", "🚫 找不到此 email"
+                    return False, "", "🚫 密碼錯誤", ""
+        return False, "", "🚫 找不到此 email", ""
     except Exception as e:
-        return False, "", f"驗證失敗: {str(e)}"
+        return False, "", f"驗證失敗: {str(e)}", ""
 
 SIGNUP_FORM_URL = st.secrets.get("signup_form_url", "")
 
@@ -107,6 +108,7 @@ def check_password():
                         st.session_state["username"] = user
                         st.session_state["user_token"] = url_token
                         st.session_state["login_method"] = "legacy"
+                        st.session_state["role"] = "member"
                         if "token" in st.query_params:
                             st.query_params.clear()
                         return True
@@ -115,6 +117,7 @@ def check_password():
                     st.session_state["username"] = user
                     st.session_state["user_token"] = url_token
                     st.session_state["login_method"] = "legacy"
+                    st.session_state["role"] = "member"
                     if "token" in st.query_params:
                         st.query_params.clear()
                     return True
@@ -137,23 +140,20 @@ def check_password():
         st.markdown('<div class="login-title">📡 stock-radar</div>', unsafe_allow_html=True)
         st.markdown('<div class="login-sub">分點追蹤平台</div>', unsafe_allow_html=True)
         login_status = st.session_state.get("login_status", "")
-        
-        # --- 修改開始：利用 st.form 解決瀏覽器記憶密碼抓不到值的問題 ---
+
         with st.form("login_form"):
             email_input = st.text_input("Email", placeholder="your@email.com", autocomplete="username")
             pw_input = st.text_input("密碼", type="password", placeholder="輸入密碼", autocomplete="current-password")
-            
-            # form_submit_button 會強制一次性收集表單內的所有資料
             submit_btn = st.form_submit_button("🔐 登入", use_container_width=True, type="primary")
-            
             if submit_btn:
                 if email_input and pw_input:
-                    success, username, msg = verify_email_login(email_input, pw_input)
+                    success, username, msg, role = verify_email_login(email_input, pw_input)
                     if success:
                         st.session_state["password_correct"] = True
                         st.session_state["username"] = username
                         st.session_state["user_token"] = email_input
                         st.session_state["login_method"] = "email"
+                        st.session_state["role"] = role
                         st.session_state["login_status"] = ""
                         st.rerun()
                     else:
@@ -162,7 +162,6 @@ def check_password():
                 else:
                     st.session_state["login_status"] = "請輸入 Email 和密碼"
                     st.rerun()
-        # --- 修改結束 ---
 
         if login_status and "OK" not in login_status:
             st.error(login_status)
@@ -184,6 +183,7 @@ def check_password():
                     st.session_state["username"] = user
                     st.session_state["user_token"] = user_pwd_input
                     st.session_state["login_method"] = "legacy"
+                    st.session_state["role"] = "member"
                     st.session_state["login_status"] = ""
                     del st.session_state["legacy_pwd_input"]
                     return
@@ -254,6 +254,31 @@ def save_gsheet_watchlist(username, wl_list):
         return False, f"寫入錯誤: {str(e)}"
 
 # ==========================================
+# 📡 掃描結果清單（VIP 專屬）
+# ==========================================
+@st.cache_data(ttl=300)
+def load_scan_result():
+    """從 Google Sheets 的 ScanResult 分頁讀取掃描結果"""
+    if not GSHEETS_AVAILABLE or "gcp_service_account" not in st.secrets:
+        return pd.DataFrame()
+    try:
+        scopes = ['https://www.googleapis.com/auth/spreadsheets']
+        creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
+        client = gspread.authorize(creds)
+        raw_url = st.secrets["gsheets"]["spreadsheet_url"]
+        doc = client.open_by_url(raw_url.split("?")[0])
+        try:
+            scan_ws = doc.worksheet("ScanResult")
+        except:
+            return pd.DataFrame()
+        data = scan_ws.get_all_records()
+        if not data:
+            return pd.DataFrame()
+        return pd.DataFrame(data)
+    except Exception:
+        return pd.DataFrame()
+
+# ==========================================
 # 頁面常數
 # ==========================================
 PAGE_T1 = "🚀 特定分點"
@@ -271,6 +296,8 @@ if 'current_page' not in st.session_state:
 with st.sidebar:
     current_user = st.session_state.get('username', 'VIP會員')
     login_method = st.session_state.get('login_method', 'legacy')
+    user_role    = st.session_state.get('role', 'member')
+
     st.markdown(f"### 👤 {current_user}")
     if login_method == "email":
         st.caption("✅ 已用 Email 帳號登入")
@@ -282,6 +309,59 @@ with st.sidebar:
             st.caption("⚠️ 此參數等同您的密碼，請勿外流！")
     if not GSHEETS_AVAILABLE or "gcp_service_account" not in st.secrets:
         st.warning("⚠️ 系統未偵測到 Google Sheets 金鑰，清單將僅暫存於本次連線。")
+
+    # ── VIP 專屬：掃描結果清單 ──
+    if user_role == "vip":
+        st.markdown("---")
+        st.markdown("#### 📡 VIP 掃描清單")
+        with st.expander("展開查看", expanded=False):
+            scan_df = load_scan_result()
+            if scan_df.empty:
+                st.caption("尚無資料，請先上傳掃描結果至 ScanResult 分頁")
+            else:
+                # 篩選器
+                dir_options = ["全部"] + [d for d in ["買進", "賣出"] if "方向" in scan_df.columns]
+                col_dir = st.selectbox("方向篩選", dir_options, key="scan_dir_filter")
+                scan_show = scan_df.copy()
+                if col_dir != "全部" and "方向" in scan_show.columns:
+                    scan_show = scan_show[scan_show["方向"] == col_dir]
+
+                st.caption(f"共 {len(scan_show)} 筆")
+
+                # 顯示欄位：只留關鍵欄
+                display_cols = [c for c in ["股票代號", "股票名稱", "分點名稱", "方向", "張數", "佔比%", "訊號摘要"] if c in scan_show.columns]
+                scan_show = scan_show[display_cols].copy()
+                scan_show.insert(0, "📊", False)
+
+                edited = st.data_editor(
+                    scan_show,
+                    hide_index=True,
+                    column_config={"📊": st.column_config.CheckboxColumn("載入K線")},
+                    use_container_width=True,
+                    key="scan_editor"
+                )
+                if "scan_editor" in st.session_state:
+                    edits = st.session_state["scan_editor"].get("edited_rows", {})
+                    for row_idx, changes in edits.items():
+                        if changes.get("📊", False):
+                            row = scan_show.iloc[row_idx]
+                            sid = str(row.get("股票代號", "")).strip()
+                            br  = str(row.get("分點名稱", "")).strip()
+                            # 嘗試比對分點名稱
+                            matched_br = br if br in BROKER_MAP else next(
+                                (k for k in BROKER_MAP if br in k or k in br), None)
+                            if sid and matched_br:
+                                st.session_state.t4_target_sid = sid
+                                st.session_state.t4_target_br  = matched_br
+                                st.session_state.auto_draw = True
+                                st.session_state.current_page = PAGE_T4
+                                st.rerun()
+                            elif sid:
+                                # 分點對不到就只帶股票代號
+                                st.session_state.t4_target_sid = sid
+                                st.session_state.auto_draw = True
+                                st.session_state.current_page = PAGE_T4
+                                st.rerun()
 
     st.markdown("---")
     st.markdown("#### 🗺️ 頁面導航")
@@ -318,31 +398,26 @@ if 'watchlist_loaded' not in st.session_state:
     st.session_state.watchlist = load_gsheet_watchlist(current_user)
     st.session_state.watchlist_loaded = True
 
-# ── 新增：用來記憶 T1~T3 UI 輸入框與最後查詢狀態的變數 ──
 if 't1_val_hq' not in st.session_state: st.session_state.t1_val_hq = None
 if 't1_val_br' not in st.session_state: st.session_state.t1_val_br = None
 if 't1_last_br' not in st.session_state: st.session_state.t1_last_br = None
 if 't1_last_br_id' not in st.session_state: st.session_state.t1_last_br_id = None
-
 if 't2_val_sid' not in st.session_state: st.session_state.t2_val_sid = "2408"
 if 't2_last_sid' not in st.session_state: st.session_state.t2_last_sid = "2408"
-
 if 't3_val_loc' not in st.session_state: st.session_state.t3_val_loc = None
 if 't3_val_br' not in st.session_state: st.session_state.t3_val_br = None
 if 't3_last_br' not in st.session_state: st.session_state.t3_last_br = None
 if 't3_last_br_id' not in st.session_state: st.session_state.t3_last_br_id = None
-# === 新增：用來記憶 T1~T3 日期區間的變數 ===
+
 default_start = datetime.date.today() - datetime.timedelta(days=7)
 default_end = datetime.date.today()
-
 if 't1_val_sd' not in st.session_state: st.session_state.t1_val_sd = default_start
 if 't1_val_ed' not in st.session_state: st.session_state.t1_val_ed = default_end
-
 if 't2_val_sd' not in st.session_state: st.session_state.t2_val_sd = default_start
 if 't2_val_ed' not in st.session_state: st.session_state.t2_val_ed = default_end
-
 if 't3_val_sd' not in st.session_state: st.session_state.t3_val_sd = default_start
 if 't3_val_ed' not in st.session_state: st.session_state.t3_val_ed = default_end
+
 # ==========================================
 # 資料載入函數
 # ==========================================
@@ -513,10 +588,10 @@ if cur_page == PAGE_T1:
         sel_br_id = b_opts[sel_br_l]
 
     c3, c4, c5 = st.columns(3)
-    with c3: 
+    with c3:
         t1_sd = st.date_input("區間起點", value=st.session_state.t1_val_sd, key="t1_sd")
         st.session_state.t1_val_sd = t1_sd
-    with c4: 
+    with c4:
         t1_ed = st.date_input("區間終點", value=st.session_state.t1_val_ed, key="t1_ed")
         st.session_state.t1_val_ed = t1_ed
     with c5: t1_u = st.radio("統計單位", ["張數", "金額"], horizontal=True, key="t1_unit")
@@ -530,7 +605,6 @@ if cur_page == PAGE_T1:
         st.session_state.t1_searched = True
         st.session_state.t1_last_br = sel_br_l
         st.session_state.t1_last_br_id = sel_br_id
-        
         sd_s, ed_s = t1_sd.strftime('%Y-%m-%d'), t1_ed.strftime('%Y-%m-%d')
         bid_hq = UI_TREE[sel_hq]['bid']
         c_param = "B" if '金額' in t1_u else "E"
@@ -622,10 +696,10 @@ elif cur_page == PAGE_T2:
     with c1:
         t2_sid = st.text_input("股票代號", value=st.session_state.t2_val_sid, key="t2_s")
         st.session_state.t2_val_sid = t2_sid
-    with c2: 
+    with c2:
         t2_sd = st.date_input("開始", value=st.session_state.t2_val_sd, key="t2_sd_in")
         st.session_state.t2_val_sd = t2_sd
-    with c3: 
+    with c3:
         t2_ed = st.date_input("結束", value=st.session_state.t2_val_ed, key="t2_ed_in")
         st.session_state.t2_val_ed = t2_ed
 
@@ -638,7 +712,6 @@ elif cur_page == PAGE_T2:
     if st.button("開始籌碼追蹤 🚀", key="t2_btn"):
         t2_sid_clean = t2_sid.strip().replace(" ", "").upper()
         st.session_state.t2_last_sid = t2_sid_clean
-        
         if not t2_sid_clean.isalnum():
             st.error("股票代號必須是字母數字組合。")
         else:
@@ -670,8 +743,7 @@ elif cur_page == PAGE_T2:
             except Exception as e: st.error(f"發生錯誤: {e}")
 
     if st.session_state.get('t2_buy_df') is not None and not st.session_state.t2_buy_df.empty:
-        # 強制使用最後一次成功搜尋的代號，避免使用者亂改框內文字影響連結與跳轉
-        t2_sid_clean = st.session_state.t2_last_sid 
+        t2_sid_clean = st.session_state.t2_last_sid
 
         def get_link_t2(broker_name):
             name_cleaned = broker_name.replace("亞","亞").strip()
@@ -733,16 +805,15 @@ elif cur_page == PAGE_T3:
         idx_loc_br = sorted_loc_br_keys.index(st.session_state.t3_val_br) if st.session_state.t3_val_br in sorted_loc_br_keys else 0
         sel_t3_br_l = st.selectbox("選擇該區特定分點", sorted_loc_br_keys, index=idx_loc_br, key=f"t3_br_sel_{sel_loc}")
         st.session_state.t3_val_br = sel_t3_br_l
-        
         sel_t3_br_info = loc_branches[sel_t3_br_l]
         sel_t3_hq_id = sel_t3_br_info['hq_id']
         sel_t3_br_id = sel_t3_br_info['br_id']
 
     c3, c4, c5 = st.columns(3)
-    with c3: 
+    with c3:
         t3_sd = st.date_input("區間起點", value=st.session_state.t3_val_sd, key="t3_sd")
         st.session_state.t3_val_sd = t3_sd
-    with c4: 
+    with c4:
         t3_ed = st.date_input("區間終點", value=st.session_state.t3_val_ed, key="t3_ed")
         st.session_state.t3_val_ed = t3_ed
     with c5: t3_u = st.radio("統計單位", ["張數", "金額"], horizontal=True, key="t3_unit")
@@ -755,7 +826,6 @@ elif cur_page == PAGE_T3:
     if st.button("啟動地緣雷達 📡", key="t3_go"):
         st.session_state.t3_last_br = sel_t3_br_l
         st.session_state.t3_last_br_id = sel_t3_br_id
-        
         sd_s, ed_s = t3_sd.strftime('%Y-%m-%d'), t3_ed.strftime('%Y-%m-%d')
         is_amount = '金額' in t3_u
         c_param = "B" if is_amount else "E"
@@ -938,7 +1008,6 @@ elif cur_page == PAGE_T4:
     if st.session_state.auto_draw:
         st.info("✅ 參數已帶入，請點下方 🎨 繪圖查看圖表。")
 
-    # ── 第一排：股票代號 + 搜尋分點 + 繪圖 + 存入 ──
     c_sid, c_br, c_draw, c_fav = st.columns([1, 3, 1, 1])
     with c_sid:
         t4_sid = st.text_input("股票代號", value=st.session_state.get('t4_target_sid', '6488'))
@@ -960,26 +1029,19 @@ elif cur_page == PAGE_T4:
         t4_br_id = BROKER_MAP[t4_br_name]['br_id']
         _, s_name = get_history_and_name(t4_sid_clean, t4_br_id)
         if not s_name: s_name = ""
-
         exists = False
         for item in st.session_state.watchlist:
             if item.get("股票代號") == t4_sid_clean and item.get("追蹤分點") == t4_br_name:
                 exists = True
                 updated = False
-                # 若舊紀錄沒有名稱或筆記，順便補上並更新
                 if not item.get("股票名稱"):
-                    item["股票名稱"] = s_name
-                    updated = True
+                    item["股票名稱"] = s_name; updated = True
                 if "筆記" not in item:
-                    item["筆記"] = ""
-                    updated = True
-                    
+                    item["筆記"] = ""; updated = True
                 if updated:
                     save_gsheet_watchlist(current_user, st.session_state.watchlist)
                 break
-
         if not exists:
-            # 存入時，新增 "股票名稱" 與 "筆記" 欄位
             entry = {"股票代號": t4_sid_clean, "股票名稱": s_name, "追蹤分點": t4_br_name, "筆記": ""}
             st.session_state.watchlist.append(entry)
             success, msg = save_gsheet_watchlist(current_user, st.session_state.watchlist)
@@ -1011,50 +1073,34 @@ elif cur_page == PAGE_T4:
     if st.session_state.watchlist:
         with st.expander(f"⭐ 【{current_user}】的專屬主力清單", expanded=False):
             if 'wl_refresh_key' not in st.session_state: st.session_state.wl_refresh_key = 0
-            
-            # 確保所有舊紀錄都有 "股票名稱" 與 "筆記" 這個 key
             for item in st.session_state.watchlist:
                 if "股票名稱" not in item: item["股票名稱"] = ""
                 if "筆記" not in item: item["筆記"] = ""
-                    
             wl_df = pd.DataFrame(st.session_state.watchlist)
             wl_df.insert(0, '載入', False)
             wl_df['刪除'] = False
-            
-            # 重新排列欄位順序，加入筆記欄位
             cols = ['載入', '股票代號', '股票名稱', '追蹤分點', '筆記', '刪除']
             wl_df = wl_df[[c for c in cols if c in wl_df.columns]]
-            
-            # UI 欄位設定：將代號、名稱、分點鎖定唯讀，並美化筆記欄位
             wl_config = {
-                "載入": st.column_config.CheckboxColumn("載入繪圖"), 
+                "載入": st.column_config.CheckboxColumn("載入繪圖"),
                 "刪除": st.column_config.CheckboxColumn("刪除"),
                 "股票代號": st.column_config.TextColumn(disabled=True),
                 "股票名稱": st.column_config.TextColumn(disabled=True),
                 "追蹤分點": st.column_config.TextColumn(disabled=True),
-                "筆記": st.column_config.TextColumn("📝 筆記 (點擊編輯)", help="在此輸入券商特性，按 Enter 自動存檔")
+                "筆記": st.column_config.TextColumn("📝 筆記 (點擊編輯)")
             }
-            
             editor_key = f"wl_editor_{st.session_state.wl_refresh_key}"
             st.data_editor(wl_df, hide_index=True, column_config=wl_config, width="stretch", key=editor_key)
-            
             if editor_key in st.session_state:
                 edits = st.session_state[editor_key].get('edited_rows', {})
-                action_taken = False
-                note_edited = False
-                
-                # 步驟 1：先檢查有沒有人編輯「筆記」，有的話就更新到記憶體並標記
+                action_taken = False; note_edited = False
                 for row_idx, changes in edits.items():
                     if '筆記' in changes:
                         st.session_state.watchlist[row_idx]['筆記'] = changes['筆記']
                         note_edited = True
-                
-                # 步驟 2：如果筆記有變動，背景默默上傳 Google Sheets (不觸發 rerun 導致畫面閃爍)
                 if note_edited:
                     success, msg = save_gsheet_watchlist(current_user, st.session_state.watchlist)
                     if not success: st.error(f"雲端筆記儲存失敗: {msg}")
-
-                # 步驟 3：處理打勾按鈕 (載入或刪除)
                 for row_idx, changes in edits.items():
                     if changes.get('載入', False) == True:
                         st.session_state.t4_target_sid = wl_df.iloc[row_idx]['股票代號']
@@ -1062,7 +1108,6 @@ elif cur_page == PAGE_T4:
                         st.session_state.auto_draw = True
                         st.session_state.chart_render_key += 1
                         action_taken = True; break
-                        
                     if changes.get('刪除', False) == True:
                         del_sid = wl_df.iloc[row_idx]['股票代號']
                         del_br = wl_df.iloc[row_idx]['追蹤分點']
@@ -1070,13 +1115,11 @@ elif cur_page == PAGE_T4:
                         success, msg = save_gsheet_watchlist(current_user, st.session_state.watchlist)
                         if not success: st.error(f"雲端刪除同步失敗: {msg}")
                         action_taken = True; break
-                        
                 if action_taken:
                     st.session_state.wl_refresh_key += 1; st.rerun()
 
     st.markdown("---")
 
-    # ── 跳回 T1/T2/T3 的快捷按鈕 ──
     c_back1, c_back2, c_back3, c_spacer = st.columns([1, 1, 1, 6])
     with c_back1:
         if st.button("🚀 特定分點", use_container_width=True):
@@ -1088,7 +1131,6 @@ elif cur_page == PAGE_T4:
         if st.button("📍 地緣券商", use_container_width=True):
             st.session_state.current_page = PAGE_T3; st.rerun()
 
-    # ── 週期 + K棒數 + 下載範圍 + 水平線 + 工具 ──
     if 't4_start_year' not in st.session_state: st.session_state.t4_start_year = "2015-01-01"
     if 'drawn_start_year' not in st.session_state: st.session_state.drawn_start_year = "2015-01-01"
 
@@ -1162,19 +1204,15 @@ elif cur_page == PAGE_T4:
         drawn_br_id = BROKER_MAP[drawn_br_name]['br_id']
         drawn_period = st.session_state.drawn_period
         drawn_days = st.session_state.drawn_days
-        drawn_start_year = st.session_state.drawn_start_year  # <--- 新增這行：讀取範圍
+        drawn_start_year = st.session_state.drawn_start_year
 
         with st.spinner(f"為您繪製 {drawn_sid_clean} 中..."):
             try:
-                # ---> 修改這裡：多傳入 drawn_start_year
                 df_k = get_stock_kline(drawn_sid_clean, drawn_start_year)
-                
                 if df_k.empty:
                     st.error("找不到 K 線資料。")
                 else:
-                    # ---> 修改這裡：多傳入 drawn_start_year
                     df_broker, stock_name = get_history_and_name(drawn_sid_clean, drawn_br_id, drawn_start_year)
-                    
                     if df_broker.empty: st.info("近期無交易紀錄。")
                     df_merged = pd.merge(df_k, df_broker[['Date', '買賣超']], on='Date', how='left')
                     df_merged['買賣超'] = df_merged['買賣超'].fillna(0)
@@ -1260,11 +1298,9 @@ elif cur_page == PAGE_T4:
             timeScale:{{tickMarkFormatter:(time)=>{{if(typeof time==='object'&&time.year)return time.year+'-'+String(time.month).padStart(2,'0')+'-'+String(time.day).padStart(2,'0');return time;}}}}
         }});
         chart.priceScale('right').applyOptions({{scaleMargins:{{top:0.02,bottom:0.45}}}});
-
         const seriesK=chart.addCandlestickSeries({{upColor:'#ef5350',downColor:'#26a69a',borderVisible:false,wickUpColor:'#ef5350',wickDownColor:'#26a69a',priceLineVisible:false}});
         seriesK.setData(rawData.map(d=>({{time:d.time,open:d.open,high:d.high,low:d.low,close:d.close}})));
         seriesK.setMarkers(markersPrice);
-
         const lastDataTime=rawData[rawData.length-1].time;
         markersPrice.forEach(m=>{{
             if(m.price===undefined)return;
@@ -1273,18 +1309,15 @@ elif cur_page == PAGE_T4:
             if(m.time===lastDataTime)el.setData([{{time:m.time,value:m.price}}]);
             else el.setData([{{time:m.time,value:m.price}},{{time:lastDataTime,value:m.price}}]);
         }});
-
         const bbMid=chart.addLineSeries({{color:'#FFD600',lineWidth:1,crosshairMarkerVisible:false,lastValueVisible:false,priceLineVisible:false}});
         bbMid.setData(rawData.filter(d=>d.bbm!==undefined).map(d=>({{time:d.time,value:d.bbm}})));
         const bbUp=chart.addLineSeries({{color:'rgba(255,255,255,0.4)',lineWidth:1,lineStyle:2,crosshairMarkerVisible:false,lastValueVisible:false,priceLineVisible:false}});
         bbUp.setData(rawData.filter(d=>d.bbu!==undefined).map(d=>({{time:d.time,value:d.bbu}})));
         const bbDn=chart.addLineSeries({{color:'rgba(255,255,255,0.4)',lineWidth:1,lineStyle:2,crosshairMarkerVisible:false,lastValueVisible:false,priceLineVisible:false}});
         bbDn.setData(rawData.filter(d=>d.bbd!==undefined).map(d=>({{time:d.time,value:d.bbd}})));
-
         const seriesVol=chart.addHistogramSeries({{priceFormat:{{type:'volume'}},priceScaleId:'vol',lastValueVisible:false,priceLineVisible:false}});
         seriesVol.setData(rawData.map(d=>({{time:d.time,value:d.vol,color:d.vol>0?'rgba(239,83,80,0.8)':d.vol<0?'rgba(38,166,154,0.8)':'rgba(120,120,120,0.5)'}})));
         chart.priceScale('vol').applyOptions({{scaleMargins:{{top:0.58,bottom:0.28}},visible:false}});
-
         const seriesH1=chart.addHistogramSeries({{priceFormat:{{type:'volume'}},priceScaleId:'m1',lastValueVisible:false,priceLineVisible:false}});
         seriesH1.setData(rawData.filter(d=>d.h1!==undefined).map(d=>({{time:d.time,value:d.h1,color:d.h1>=0?'rgba(239,83,80,0.5)':'rgba(38,166,154,0.5)'}})));
         const seriesM1=chart.addLineSeries({{color:'#FFD600',lineWidth:1,priceScaleId:'m1',crosshairMarkerVisible:false,lastValueVisible:false,priceLineVisible:false}});
@@ -1293,7 +1326,6 @@ elif cur_page == PAGE_T4:
         const seriesS1=chart.addLineSeries({{color:'#00E676',lineWidth:1,priceScaleId:'m1',crosshairMarkerVisible:false,lastValueVisible:false,priceLineVisible:false}});
         seriesS1.setData(rawData.filter(d=>d.s1!==undefined).map(d=>({{time:d.time,value:d.s1}})));
         chart.priceScale('m1').applyOptions({{scaleMargins:{{top:0.72,bottom:0.15}},visible:false}});
-
         const seriesH2=chart.addHistogramSeries({{priceFormat:{{type:'volume'}},priceScaleId:'m2',lastValueVisible:false,priceLineVisible:false}});
         seriesH2.setData(rawData.filter(d=>d.h2!==undefined).map(d=>({{time:d.time,value:d.h2,color:d.h2>=0?'rgba(239,83,80,0.5)':'rgba(38,166,154,0.5)'}})));
         const seriesM2=chart.addLineSeries({{color:'#FFD600',lineWidth:1,priceScaleId:'m2',crosshairMarkerVisible:false,lastValueVisible:false,priceLineVisible:false}});
@@ -1302,21 +1334,18 @@ elif cur_page == PAGE_T4:
         const seriesS2=chart.addLineSeries({{color:'#00E676',lineWidth:1,priceScaleId:'m2',crosshairMarkerVisible:false,lastValueVisible:false,priceLineVisible:false}});
         seriesS2.setData(rawData.filter(d=>d.s2!==undefined).map(d=>({{time:d.time,value:d.s2}})));
         chart.priceScale('m2').applyOptions({{scaleMargins:{{top:0.85,bottom:0.0}},visible:false}});
-
         hlines.forEach(val=>{{seriesK.createPriceLine({{price:val,color:'#2962FF',lineWidth:2,lineStyle:2,axisLabelVisible:true,title:'📏'}});}});
         clickLines.forEach(line=>{{
             const rs=chart.addLineSeries({{color:line.color,lineWidth:2,lineStyle:2,lastValueVisible:true,priceLineVisible:false,crosshairMarkerVisible:false,title:line.title}});
             if(line.startTime===lastDataTime)rs.setData([{{time:line.startTime,value:line.price}}]);
             else rs.setData([{{time:line.startTime,value:line.price}},{{time:lastDataTime,value:line.price}}]);
         }});
-
         const legend=document.getElementById('legend');
         const mobileDrawBtn=document.getElementById('mobileDrawBtn');
         const getDayOfWeek=dStr=>['週日','週一','週二','週三','週四','週五','週六'][new Date(dStr).getDay()];
         const dictByTime={{}};rawData.forEach(d=>dictByTime[d.time]=d);
         if(clickLineEnabled)mobileDrawBtn.style.display='block';
         window.addEventListener('message',e=>{{if(e.data&&e.data.type==='toggle_click_line'){{clickLineEnabled=e.data.value;mobileDrawBtn.style.display=clickLineEnabled?'block':'none';}}}});
-
         let lastCrosshairParam=null;
         chart.subscribeCrosshairMove(param=>{{
             if(!param.time||param.point===undefined||param.point.x<0||param.point.y<0){{legend.innerHTML='將滑鼠(或手指)移至 K 線上查看數據';return;}}
@@ -1330,7 +1359,6 @@ elif cur_page == PAGE_T4:
             if(d.h2!==undefined)html+=`<div class="lg-macd"><b>長 MACD:</b> 柱 <span style="color:${{d.h2>=0?'#ef5350':'#26a69a'}}">${{d.h2.toFixed(2)}}</span> | 快 <span style="color:#FFD600">${{d.m2.toFixed(2)}}</span> | 慢 <span style="color:#00E676">${{d.s2.toFixed(2)}}</span></div>`;
             legend.innerHTML=html;
         }});
-
         mobileDrawBtn.addEventListener('click',()=>{{
             if(!lastCrosshairParam||lastCrosshairParam.time===undefined||lastCrosshairParam.point===undefined||lastCrosshairParam.point.y<0){{alert('請先觸碰圖表，將十字線移動到指定的 K 棒上！');return;}}
             let timeStr=lastCrosshairParam.time;
@@ -1347,7 +1375,6 @@ elif cur_page == PAGE_T4:
             else raySeries.setData([{{time:d.time,value:targetPrice}},{{time:ldt,value:targetPrice}}]);
             window.parent.postMessage({{type:'streamlit:setComponentValue',value:{{action:'add_click_line',price:targetPrice,startTime:d.time,color:lineColor,title:lineTitle}}}}, '*');
         }});
-
         chart.subscribeClick(param=>{{if(!clickLineEnabled)return;if(param.point&&param.point.x<window.innerWidth-100)mobileDrawBtn.click();}});
         new ResizeObserver(()=>{{chart.applyOptions({{width:document.getElementById('wrapper').clientWidth,height:document.getElementById('wrapper').clientHeight}});chart.timeScale().fitContent();}}).observe(document.getElementById('wrapper'));
         setTimeout(()=>{{chart.timeScale().fitContent();}},100);
