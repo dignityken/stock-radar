@@ -348,10 +348,9 @@ with st.sidebar:
                             sid = str(row.get("股票代號", "")).strip()
                             br  = str(row.get("分點名稱", "")).strip()
                             if sid and br:
-                                st.session_state.t4_target_sid = sid
-                                st.session_state.t4_target_br  = br
-                                st.session_state.auto_draw = True
-                                st.session_state.table_refresh_key += 1
+                                # 只記錄待處理的跳轉，實際比對在頁面渲染區執行
+                                st.session_state["vip_pending_sid"] = sid
+                                st.session_state["vip_pending_br"]  = br
                                 st.session_state.current_page = PAGE_T4
                                 st.rerun()
 
@@ -911,6 +910,19 @@ elif cur_page == PAGE_T3:
 # 📊 頁面四：主力 K 線圖
 # ==========================================
 elif cur_page == PAGE_T4:
+
+    # 處理來自 VIP 掃描清單的跳轉（需在 BROKER_MAP 建立後執行）
+    if st.session_state.get("vip_pending_sid"):
+        sid = st.session_state.pop("vip_pending_sid")
+        br  = st.session_state.pop("vip_pending_br", "")
+        clean_br = br.replace("亚", "亞").strip()
+        matched_br = clean_br if clean_br in BROKER_MAP else next(
+            (k for k in BROKER_MAP if clean_br in k or k in clean_br), None)
+        st.session_state.t4_target_sid = sid
+        if matched_br:
+            st.session_state.t4_target_br = matched_br
+        st.session_state.auto_draw = True
+        st.session_state.table_refresh_key += 1
 
     def get_pine_divergence_markers(df_res, macd_col, hist_col, prefix):
         markers_price = []; markers_macd = []
