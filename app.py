@@ -321,38 +321,44 @@ with st.sidebar:
             else:
                 # ── 第一層：選分點 ──
                 broker_list = sorted(scan_df["分點名稱"].dropna().unique().tolist()) if "分點名稱" in scan_df.columns else []
-                sel_broker = st.selectbox("選擇分點", broker_list, key="scan_broker_sel")
+                if not broker_list:
+                    st.caption("分點資料格式有誤，請重新上傳")
+                else:
+                    sel_broker = st.selectbox("選擇分點", broker_list, key="scan_broker_sel")
 
-                # ── 第二層：顯示該分點的股票清單 ──
-                scan_show = scan_df[scan_df["分點名稱"] == sel_broker].copy()
-                scan_show = scan_show.sort_values("張數", ascending=False) if "張數" in scan_show.columns else scan_show
+                    # ── 第二層：顯示該分點的股票清單 ──
+                    scan_show = scan_df[scan_df["分點名稱"] == sel_broker].copy()
+                    if "張數" in scan_show.columns:
+                        scan_show = scan_show.sort_values("張數", ascending=False)
 
-                st.caption(f"{sel_broker}　共 {len(scan_show)} 檔")
+                    st.caption(f"{sel_broker}　共 {len(scan_show)} 檔")
 
-                display_cols = [c for c in ["股票代號", "股票名稱", "方向", "張數", "佔比%", "訊號摘要"] if c in scan_show.columns]
-                scan_show = scan_show[display_cols].reset_index(drop=True).copy()
-                scan_show.insert(0, "📊", False)
+                    if not scan_show.empty:
+                        display_cols = [c for c in ["股票代號", "股票名稱", "方向", "張數", "佔比%", "訊號摘要"] if c in scan_show.columns]
+                        scan_show = scan_show[display_cols].reset_index(drop=True).copy()
+                        scan_show.insert(0, "📊", False)
 
-                scan_editor_key = f"scan_editor_{st.session_state.get('table_refresh_key', 0)}"
-                st.data_editor(
-                    scan_show,
-                    hide_index=True,
-                    column_config={"📊": st.column_config.CheckboxColumn("載入K線")},
-                    use_container_width=True,
-                    key=scan_editor_key
-                )
-                if scan_editor_key in st.session_state:
-                    edits = st.session_state[scan_editor_key].get("edited_rows", {})
-                    for row_idx, changes in edits.items():
-                        if changes.get("📊", False):
-                            row = scan_show.iloc[row_idx]
-                            sid = str(row.get("股票代號", "")).strip()
-                            if sid:
-                                st.session_state["vip_pending_sid"] = sid
-                                st.session_state["vip_pending_br"]  = sel_broker
-                                st.session_state.table_refresh_key += 1
-                                st.session_state.current_page = PAGE_T4
-                                st.rerun()
+                        refresh_key = st.session_state.get("table_refresh_key", 0)
+                        scan_editor_key = f"scan_editor_{refresh_key}"
+                        st.data_editor(
+                            scan_show,
+                            hide_index=True,
+                            column_config={"📊": st.column_config.CheckboxColumn("載入K線")},
+                            use_container_width=True,
+                            key=scan_editor_key
+                        )
+                        if scan_editor_key in st.session_state:
+                            edits = st.session_state[scan_editor_key].get("edited_rows", {})
+                            for row_idx, changes in edits.items():
+                                if changes.get("📊", False):
+                                    row = scan_show.iloc[row_idx]
+                                    sid = str(row.get("股票代號", "")).strip()
+                                    if sid:
+                                        st.session_state["vip_pending_sid"] = sid
+                                        st.session_state["vip_pending_br"]  = sel_broker
+                                        st.session_state["table_refresh_key"] = refresh_key + 1
+                                        st.session_state.current_page = PAGE_T4
+                                        st.rerun()
 
     st.markdown("---")
     st.markdown("#### 🗺️ 頁面導航")
