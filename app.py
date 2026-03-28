@@ -319,22 +319,22 @@ with st.sidebar:
             if scan_df.empty:
                 st.caption("尚無資料，請先上傳掃描結果至 ScanResult 分頁")
             else:
-                # 篩選器
-                dir_options = ["全部"] + [d for d in ["買進", "賣出"] if "方向" in scan_df.columns]
-                col_dir = st.selectbox("方向篩選", dir_options, key="scan_dir_filter")
-                scan_show = scan_df.copy()
-                if col_dir != "全部" and "方向" in scan_show.columns:
-                    scan_show = scan_show[scan_show["方向"] == col_dir]
+                # ── 第一層：選分點 ──
+                broker_list = sorted(scan_df["分點名稱"].dropna().unique().tolist()) if "分點名稱" in scan_df.columns else []
+                sel_broker = st.selectbox("選擇分點", broker_list, key="scan_broker_sel")
 
-                st.caption(f"共 {len(scan_show)} 筆")
+                # ── 第二層：顯示該分點的股票清單 ──
+                scan_show = scan_df[scan_df["分點名稱"] == sel_broker].copy()
+                scan_show = scan_show.sort_values("張數", ascending=False) if "張數" in scan_show.columns else scan_show
 
-                # 顯示欄位：只留關鍵欄
-                display_cols = [c for c in ["股票代號", "股票名稱", "分點名稱", "方向", "張數", "佔比%", "訊號摘要"] if c in scan_show.columns]
-                scan_show = scan_show[display_cols].copy()
+                st.caption(f"{sel_broker}　共 {len(scan_show)} 檔")
+
+                display_cols = [c for c in ["股票代號", "股票名稱", "方向", "張數", "佔比%", "訊號摘要"] if c in scan_show.columns]
+                scan_show = scan_show[display_cols].reset_index(drop=True).copy()
                 scan_show.insert(0, "📊", False)
 
                 scan_editor_key = f"scan_editor_{st.session_state.table_refresh_key}"
-                edited = st.data_editor(
+                st.data_editor(
                     scan_show,
                     hide_index=True,
                     column_config={"📊": st.column_config.CheckboxColumn("載入K線")},
@@ -347,10 +347,9 @@ with st.sidebar:
                         if changes.get("📊", False):
                             row = scan_show.iloc[row_idx]
                             sid = str(row.get("股票代號", "")).strip()
-                            br  = str(row.get("分點名稱", "")).strip()
-                            if sid and br:
+                            if sid:
                                 st.session_state["vip_pending_sid"] = sid
-                                st.session_state["vip_pending_br"]  = br
+                                st.session_state["vip_pending_br"]  = sel_broker
                                 st.session_state.table_refresh_key += 1
                                 st.session_state.current_page = PAGE_T4
                                 st.rerun()
