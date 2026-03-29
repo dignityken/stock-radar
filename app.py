@@ -384,13 +384,19 @@ with st.sidebar:
 
                 col_dir = st.selectbox("方向", ["全部", "買進", "賣出"], key="scan_dir_filter")
                 min_score = st.slider("最低強度", 0, 120, 60, step=5, key="scan_min_score")
+                min_pct = st.slider("最低佔比%", 0, 100, 60, step=5, key="scan_min_pct")
+                min_vol = st.number_input("最低張數", min_value=0, value=20, step=10, key="scan_min_vol")
 
-                # ── 先套用日期、方向、強度篩選（不含分點）──
+                # ── 先套用日期、方向、強度、佔比、張數篩選（不含分點）──
                 scan_filtered = scan_df.copy()
                 scan_filtered = scan_filtered[scan_filtered["最新訊號日"].apply(lambda d: d is not None and d >= cutoff)]
                 if col_dir != "全部" and "方向" in scan_filtered.columns:
                     scan_filtered = scan_filtered[scan_filtered["方向"] == col_dir]
                 scan_filtered = scan_filtered[scan_filtered["強度"] >= min_score]
+                if "佔比%" in scan_filtered.columns:
+                    scan_filtered = scan_filtered[pd.to_numeric(scan_filtered["佔比%"], errors='coerce').fillna(0) >= min_pct]
+                if "張數" in scan_filtered.columns:
+                    scan_filtered = scan_filtered[pd.to_numeric(scan_filtered["張數"], errors='coerce').fillna(0) >= min_vol]
 
                 # ── 動態建立分點選單（只顯示有符合條件資料的分點）──
                 if "分點名稱" in scan_filtered.columns:
