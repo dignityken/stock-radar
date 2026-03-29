@@ -656,6 +656,7 @@ if cur_page == PAGE_T1:
         st.session_state.t1_searched = True
         st.session_state.t1_last_br = sel_br_l
         st.session_state.t1_last_br_id = sel_br_id
+        st.session_state.table_refresh_key += 1
         sd_s, ed_s = t1_sd.strftime('%Y-%m-%d'), t1_ed.strftime('%Y-%m-%d')
         bid_hq = UI_TREE[sel_hq]['bid']
         c_param = "B" if '金額' in t1_u else "E"
@@ -726,8 +727,8 @@ if cur_page == PAGE_T1:
                             sid_clicked = df_show.iloc[row_idx]['extracted_stock_id']
                             st.session_state.t4_target_sid = sid_clicked
                             st.session_state.t4_target_br = st.session_state.t1_last_br
+                            st.session_state.drawn_period = t4_period if 't4_period_bot' not in st.session_state else st.session_state.get('t4_period_bot', '日')
                             st.session_state.auto_draw = True
-                            st.session_state.table_refresh_key += 1
                             st.session_state.current_page = PAGE_T4
                             st.rerun()
 
@@ -763,6 +764,7 @@ elif cur_page == PAGE_T2:
     if st.button("開始籌碼追蹤 🚀", key="t2_btn"):
         t2_sid_clean = t2_sid.strip().replace(" ", "").upper()
         st.session_state.t2_last_sid = t2_sid_clean
+        st.session_state.table_refresh_key += 1
         if not t2_sid_clean.isalnum():
             st.error("股票代號必須是字母數字組合。")
         else:
@@ -827,7 +829,6 @@ elif cur_page == PAGE_T2:
                             matched_br = clean_br if clean_br in BROKER_MAP else next((k for k in BROKER_MAP if clean_br in k or k in clean_br), None)
                             if matched_br: st.session_state.t4_target_br = matched_br
                             st.session_state.auto_draw = True
-                            st.session_state.table_refresh_key += 1
                             st.session_state.current_page = PAGE_T4
                             st.rerun()
 
@@ -877,6 +878,7 @@ elif cur_page == PAGE_T3:
     if st.button("啟動地緣雷達 📡", key="t3_go"):
         st.session_state.t3_last_br = sel_t3_br_l
         st.session_state.t3_last_br_id = sel_t3_br_id
+        st.session_state.table_refresh_key += 1
         sd_s, ed_s = t3_sd.strftime('%Y-%m-%d'), t3_ed.strftime('%Y-%m-%d')
         is_amount = '金額' in t3_u
         c_param = "B" if is_amount else "E"
@@ -954,7 +956,6 @@ elif cur_page == PAGE_T3:
                             st.session_state.t4_target_sid = sid_clicked
                             st.session_state.t4_target_br = st.session_state.t3_last_br
                             st.session_state.auto_draw = True
-                            st.session_state.table_refresh_key += 1
                             st.session_state.current_page = PAGE_T4
                             st.rerun()
 
@@ -1171,7 +1172,6 @@ elif cur_page == PAGE_T4:
                         st.session_state.t4_target_sid = wl_df.iloc[row_idx]['股票代號']
                         st.session_state.t4_target_br = wl_df.iloc[row_idx]['追蹤分點']
                         st.session_state.auto_draw = True
-                        st.session_state.chart_render_key += 1
                         action_taken = True; break
                     if changes.get('刪除', False) == True:
                         del_sid = wl_df.iloc[row_idx]['股票代號']
