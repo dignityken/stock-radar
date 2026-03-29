@@ -357,14 +357,26 @@ with st.sidebar:
                 broker_list = ["全部分點"] + sorted(scan_df["分點名稱"].dropna().unique().tolist()) if "分點名稱" in scan_df.columns else ["全部分點"]
                 sel_broker = st.selectbox("分點過濾", broker_list, key="scan_broker_sel")
 
-                # ── 套用篩選 ──
-                scan_show = scan_df.copy()
-                scan_show = scan_show[scan_show["最新訊號日"].apply(lambda d: d is not None and d >= cutoff)]
-                if col_dir != "全部" and "方向" in scan_show.columns:
-                    scan_show = scan_show[scan_show["方向"] == col_dir]
-                if sel_broker != "全部分點" and "分點名稱" in scan_show.columns:
-                    scan_show = scan_show[scan_show["分點名稱"] == sel_broker]
-                scan_show = scan_show[scan_show["強度"] >= min_score]
+                # ── 先套用日期、方向、強度篩選（不含分點）──
+                scan_filtered = scan_df.copy()
+                scan_filtered = scan_filtered[scan_filtered["最新訊號日"].apply(lambda d: d is not None and d >= cutoff)]
+                if col_dir != "全部" and "方向" in scan_filtered.columns:
+                    scan_filtered = scan_filtered[scan_filtered["方向"] == col_dir]
+                scan_filtered = scan_filtered[scan_filtered["強度"] >= min_score]
+
+                # ── 動態建立分點選單（只顯示有符合條件資料的分點）──
+                if "分點名稱" in scan_filtered.columns:
+                    broker_counts = scan_filtered.groupby("分點名稱").size().sort_values(ascending=False)
+                    broker_opts = ["全部分點"] + [f"{br}（{cnt}檔）" for br, cnt in broker_counts.items()]
+                else:
+                    broker_opts = ["全部分點"]
+                sel_broker = st.selectbox("分點過濾", broker_opts, key="scan_broker_sel")
+
+                # ── 再套用分點篩選 ──
+                scan_show = scan_filtered.copy()
+                if sel_broker != "全部分點":
+                    real_broker = sel_broker.split("（")[0]
+                    scan_show = scan_show[scan_show["分點名稱"] == real_broker]
                 scan_show = scan_show.sort_values("強度", ascending=False)
 
                 st.caption(f"近{recent_n}天　強度≥{min_score}　共 **{len(scan_show)}** 檔")
@@ -390,6 +402,8 @@ with st.sidebar:
                                 row = scan_show.iloc[row_idx]
                                 sid = str(row.get("股票代號", "")).strip()
                                 br  = str(row.get("分點名稱", "")).strip()
+                                if not br and sel_broker != "全部分點":
+                                    br = sel_broker.split("（")[0]
                                 if sid and br:
                                     st.session_state["vip_pending_sid"] = sid
                                     st.session_state["vip_pending_br"]  = br
