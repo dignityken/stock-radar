@@ -1247,11 +1247,13 @@ elif cur_page == PAGE_T4:
     draw_btn = draw_btn or draw_btn2
 
     if st.session_state.get('show_chart', False):
-        if t4_period != st.session_state.get('drawn_period', '日') or t4_start_val != st.session_state.get('drawn_start_year', '2015-01-01'):
-            st.session_state.drawn_period = t4_period
-            st.session_state.drawn_start_year = t4_start_val
-            st.session_state.chart_render_key += 1
-            st.rerun()
+        # 若有 vip_force_period，跳過週期自動同步（避免把強制週期蓋掉）
+        if "vip_force_period" not in st.session_state:
+            if t4_period != st.session_state.get('drawn_period', '日') or t4_start_val != st.session_state.get('drawn_start_year', '2015-01-01'):
+                st.session_state.drawn_period = t4_period
+                st.session_state.drawn_start_year = t4_start_val
+                st.session_state.chart_render_key += 1
+                st.rerun()
 
     if draw_btn or st.session_state.auto_draw:
         st.session_state.auto_draw = False
