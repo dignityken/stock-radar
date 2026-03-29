@@ -379,6 +379,10 @@ with st.sidebar:
                     scan_show = scan_show[scan_show["分點名稱"] == real_broker]
                 scan_show = scan_show.sort_values("強度", ascending=False)
 
+                sort_options = [c for c in ["強度", "張數", "金額(萬)", "佔比%", "最新訊號日"] if c in scan_show.columns]
+                sort_col = st.selectbox("排序依據", sort_options, key="scan_sort_col")
+                scan_show = scan_show.sort_values(sort_col, ascending=False)
+
                 st.caption(f"近{recent_n}天　強度≥{min_score}　共 **{len(scan_show)}** 檔")
 
                 if not scan_show.empty:
@@ -733,10 +737,12 @@ if cur_page == PAGE_T1:
 
         col_b = '買進金額' if '金額' in t1_u else '買進張數'
         col_s = '賣出金額' if '金額' in t1_u else '賣出張數'
+        sort_opts_t1 = ['買%', col_b, col_s, '總額', '賣%']
+        t1_sort = st.selectbox("排序依據", sort_opts_t1, key="t1_sort_col")
         st.markdown(f"### 🔴 買進 - 共 {len(st.session_state.t1_buy_df)} 檔")
-        display_table_with_button(st.session_state.t1_buy_df.sort_values(by=col_b, ascending=False).head(999 if show_full else 10), "t1_buy")
+        display_table_with_button(st.session_state.t1_buy_df.sort_values(by=t1_sort, ascending=False).head(999 if show_full else 10), "t1_buy")
         st.markdown(f"### 🟢 賣出 - 共 {len(st.session_state.t1_sell_df)} 檔")
-        display_table_with_button(st.session_state.t1_sell_df.sort_values(by=col_s, ascending=False).head(999 if show_full else 10), "t1_sell")
+        display_table_with_button(st.session_state.t1_sell_df.sort_values(by=t1_sort, ascending=False).head(999 if show_full else 10), "t1_sell")
 
 # ==========================================
 # 📊 頁面二：股票代號
@@ -831,10 +837,12 @@ elif cur_page == PAGE_T2:
                             st.session_state.current_page = PAGE_T4
                             st.rerun()
 
+        t2_sort = st.selectbox("排序依據", ["買進%", "買", "賣", "合計", "賣出%"], key="t2_sort_col")
+        t2_sort_col = {"買進%": "買進%", "買": "買", "賣": "賣", "合計": "合計", "賣出%": "賣出%"}[t2_sort]
         st.subheader("🔴 買進分點")
-        display_table_with_button_t2(st.session_state.t2_buy_df.sort_values('買', ascending=False).head(999 if show_full_t2 else 10), "t2_buy")
+        display_table_with_button_t2(st.session_state.t2_buy_df.sort_values(t2_sort_col, ascending=False).head(999 if show_full_t2 else 10), "t2_buy")
         st.subheader("🟢 賣出分點")
-        display_table_with_button_t2(st.session_state.t2_sell_df.sort_values('賣', ascending=False).head(999 if show_full_t2 else 10), "t2_sell")
+        display_table_with_button_t2(st.session_state.t2_sell_df.sort_values(t2_sort_col, ascending=False).head(999 if show_full_t2 else 10), "t2_sell")
 
 # ==========================================
 # 📍 頁面三：地緣券商
@@ -961,10 +969,12 @@ elif cur_page == PAGE_T3:
         sd_s, ed_s = t3_sd.strftime('%Y-%m-%d'), t3_ed.strftime('%Y-%m-%d')
         st.subheader(f"🕵️ 地緣雷達結果：{st.session_state.t3_last_br}")
         st.caption(f"📌 區間：{sd_s} ~ {ed_s} | 單位：{t3_u}")
+        sort_opts_t3 = ['買%', col_buy, col_sell, '總額', '賣%']
+        t3_sort = st.selectbox("排序依據", sort_opts_t3, key="t3_sort_col")
         st.markdown(f"### 🔴 該分點買進 - 共 {len(st.session_state.t3_buy_df)} 檔")
-        display_table_with_button_t3(st.session_state.t3_buy_df.sort_values(by=col_buy, ascending=False).head(999 if show_full_t3 else 10), "t3_buy")
+        display_table_with_button_t3(st.session_state.t3_buy_df.sort_values(by=t3_sort, ascending=False).head(999 if show_full_t3 else 10), "t3_buy")
         st.markdown(f"### 🟢 該分點賣出 - 共 {len(st.session_state.t3_sell_df)} 檔")
-        display_table_with_button_t3(st.session_state.t3_sell_df.sort_values(by=col_sell, ascending=False).head(999 if show_full_t3 else 10), "t3_sell")
+        display_table_with_button_t3(st.session_state.t3_sell_df.sort_values(by=t3_sort, ascending=False).head(999 if show_full_t3 else 10), "t3_sell")
 
 # ==========================================
 # 📊 頁面四：主力 K 線圖
