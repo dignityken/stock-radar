@@ -972,14 +972,17 @@ elif cur_page == PAGE_T4:
 
     # 處理來自 VIP 掃描清單的跳轉（需在 BROKER_MAP 建立後執行）
     if st.session_state.get("vip_pending_sid"):
-        sid = st.session_state.pop("vip_pending_sid")
-        br  = st.session_state.pop("vip_pending_br", "")
+        sid    = st.session_state.pop("vip_pending_sid")
+        br     = st.session_state.pop("vip_pending_br", "")
+        period = st.session_state.pop("vip_pending_period", "日")
         clean_br = br.replace("亚", "亞").strip()
         matched_br = clean_br if clean_br in BROKER_MAP else next(
             (k for k in BROKER_MAP if clean_br in k or k in clean_br), None)
         st.session_state.t4_target_sid = sid
         if matched_br:
             st.session_state.t4_target_br = matched_br
+        # 自動切換繪圖週期
+        st.session_state["vip_auto_period"] = period
         st.session_state.auto_draw = True
         st.rerun()
 
@@ -1199,7 +1202,14 @@ elif cur_page == PAGE_T4:
 
     c_per, c_days, c_start, c_hval, c_hadd, c_click, c_hclr, c_draw2 = st.columns([1.5, 1.5, 1.5, 1.5, 1, 1, 1, 1])
     with c_per:
-        t4_period = st.radio("週期", ["日", "週", "月"], horizontal=True, key="t4_period_bot")
+        # 若來自 VIP 清單跳轉，自動套用對應週期
+        if "vip_auto_period" in st.session_state:
+            auto_p = st.session_state.pop("vip_auto_period")
+            period_map = {"日": 0, "週": 1, "月": 2}
+            default_period_idx = period_map.get(auto_p, 0)
+        else:
+            default_period_idx = ["日", "週", "月"].index(st.session_state.get("drawn_period", "日"))
+        t4_period = st.radio("週期", ["日", "週", "月"], index=default_period_idx, horizontal=True, key="t4_period_bot")
     with c_days:
         days_mode = st.selectbox("顯示K棒數", [300, 500, 1000, "自訂..."])
         if days_mode == "自訂...":
