@@ -982,7 +982,9 @@ elif cur_page == PAGE_T4:
         if matched_br:
             st.session_state.t4_target_br = matched_br
         # 自動切換繪圖週期
-        st.session_state["vip_auto_period"] = period
+        # 直接改 radio 的 session state key，強制切換週期
+        period_map = {"日": "日", "週": "週", "月": "月"}
+        st.session_state["t4_period_bot"] = period_map.get(period, "日")
         st.session_state.auto_draw = True
         st.rerun()
 
@@ -1202,14 +1204,7 @@ elif cur_page == PAGE_T4:
 
     c_per, c_days, c_start, c_hval, c_hadd, c_click, c_hclr, c_draw2 = st.columns([1.5, 1.5, 1.5, 1.5, 1, 1, 1, 1])
     with c_per:
-        # 若來自 VIP 清單跳轉，自動套用對應週期
-        if "vip_auto_period" in st.session_state:
-            auto_p = st.session_state.pop("vip_auto_period")
-            period_map = {"日": 0, "週": 1, "月": 2}
-            default_period_idx = period_map.get(auto_p, 0)
-        else:
-            default_period_idx = ["日", "週", "月"].index(st.session_state.get("drawn_period", "日"))
-        t4_period = st.radio("週期", ["日", "週", "月"], index=default_period_idx, horizontal=True, key="t4_period_bot")
+        t4_period = st.radio("週期", ["日", "週", "月"], horizontal=True, key="t4_period_bot")
     with c_days:
         days_mode = st.selectbox("顯示K棒數", [300, 500, 1000, "自訂..."])
         if days_mode == "自訂...":
