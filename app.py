@@ -981,9 +981,7 @@ elif cur_page == PAGE_T4:
         st.session_state.t4_target_sid = sid
         if matched_br:
             st.session_state.t4_target_br = matched_br
-        # 強制覆蓋 drawn_period，auto_draw 繪圖時直接用
-        st.session_state["vip_force_period"] = period
-        st.session_state["drawn_period"] = period
+        st.session_state.drawn_period = period
         st.session_state.auto_draw = True
         st.rerun()
 
@@ -1246,7 +1244,9 @@ elif cur_page == PAGE_T4:
 
     draw_btn = draw_btn or draw_btn2
 
-    if draw_btn or st.session_state.auto_draw:
+    if draw_btn:
+        # 手動點繪圖按鈕：用 radio 當前選的週期
+        st.session_state.drawn_period = t4_period
         st.session_state.auto_draw = False
         st.session_state.show_chart = True
         st.session_state.chart_render_key += 1
@@ -1254,10 +1254,18 @@ elif cur_page == PAGE_T4:
         st.session_state.t4_target_br = t4_br_name
         st.session_state.drawn_sid = t4_sid
         st.session_state.drawn_br_name = t4_br_name
-        if "vip_force_period" in st.session_state:
-            st.session_state.drawn_period = st.session_state.pop("vip_force_period")
-        else:
-            st.session_state.drawn_period = t4_period
+        st.session_state.drawn_days = t4_days
+        st.session_state.drawn_start_year = t4_start_val
+
+    elif st.session_state.auto_draw:
+        # 自動繪圖（含 VIP 帶入）：用已設好的 drawn_period，不覆蓋
+        st.session_state.auto_draw = False
+        st.session_state.show_chart = True
+        st.session_state.chart_render_key += 1
+        st.session_state.t4_target_sid = t4_sid
+        st.session_state.t4_target_br = t4_br_name
+        st.session_state.drawn_sid = t4_sid
+        st.session_state.drawn_br_name = t4_br_name
         st.session_state.drawn_days = t4_days
         st.session_state.drawn_start_year = t4_start_val
 
