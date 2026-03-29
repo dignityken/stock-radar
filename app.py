@@ -257,8 +257,8 @@ def save_gsheet_watchlist(username, wl_list):
 # 📡 掃描結果清單（VIP 專屬）
 # ==========================================
 @st.cache_data(ttl=300)
-def load_scan_result():
-    """從 Google Sheets 的 ScanResult 分頁讀取掃描結果"""
+def load_scan_result(sheet_name="ScanResult"):
+    """從 Google Sheets 的指定分頁讀取掃描結果"""
     if not GSHEETS_AVAILABLE or "gcp_service_account" not in st.secrets:
         return pd.DataFrame()
     try:
@@ -268,7 +268,7 @@ def load_scan_result():
         raw_url = st.secrets["gsheets"]["spreadsheet_url"]
         doc = client.open_by_url(raw_url.split("?")[0])
         try:
-            scan_ws = doc.worksheet("ScanResult")
+            scan_ws = doc.worksheet(sheet_name)
         except:
             return pd.DataFrame()
         data = scan_ws.get_all_records()
@@ -315,9 +315,12 @@ with st.sidebar:
         st.markdown("---")
         st.markdown("#### 📡 VIP 掃描清單")
         with st.expander("展開查看", expanded=False):
-            scan_df = load_scan_result()
+            # ── 日/週切換 ──
+            kline_period = st.radio("K線週期", ["日", "週"], horizontal=True, key="vip_kline_period")
+            sheet_name = "ScanResult_W" if kline_period == "週" else "ScanResult"
+            scan_df = load_scan_result(sheet_name)
             if scan_df.empty:
-                st.caption("尚無資料，請先上傳掃描結果至 ScanResult 分頁")
+                st.caption(f"尚無資料，請先上傳掃描結果至 {sheet_name} 分頁")
             else:
                 # ── 從訊號摘要抓最新訊號日期 ──
                 def get_latest_signal_date(summary):
