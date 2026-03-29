@@ -326,15 +326,53 @@ with st.sidebar:
                 else:
                     sel_broker = st.selectbox("選擇分點", broker_list, key="scan_broker_sel")
 
+                    # ── 近期篩選 ──
+                    recent_n = st.slider("只看最近幾天訊號", 7, 180, 60, step=7, key="scan_recent_days")
+
                     # ── 第二層：顯示該分點的股票清單 ──
                     scan_show = scan_df[scan_df["分點名稱"] == sel_broker].copy()
-                    if "張數" in scan_show.columns:
-                        scan_show = scan_show.sort_values("張數", ascending=False)
 
-                    st.caption(f"{sel_broker}　共 {len(scan_show)} 檔")
+                    # 從訊號摘要抓最新訊號日期來過濾
+                    def get_latest_signal_date(summary):
+                        import re
+                        dates = re.findall(r"\d{4}/\d{2}/\d{2}", str(summary))
+                        if not dates: return None
+                        try:
+                            return max(datetime.datetime.strptime(d, "%Y/%m/%d").date() for d in dates)
+                        except: return None
+
+                    cutoff = datetime.date.today() - datetime.timedelta(days=recent_n)
+                    scan_show["最新訊號日"] = scan_show["訊號摘要"].apply(get_latest_signal_date)
+                    scan_show = scan_show[scan_show["最新訊號日"].apply(lambda d: d is not None and d >= cutoff)]
+
+                    # ── 強度分數 ──
+                    def calc_score(row):
+                        score = 0
+                        # 佔比分（最高40分）
+                        score += min(float(row.get("佔比%", 0)), 100) * 0.4
+                        # 金額規模分（最高40分）
+                        amt = float(row.get("金額(萬)", 0)) if "金額(萬)" in row.index else float(row.get("張數", 0))
+                        score += min(amt / 500, 1) * 40
+                        # 近期加分（最高20分）
+                        latest = row.get("最新訊號日")
+                        if latest:
+                            days_ago = (datetime.date.today() - latest).days
+                            score += max(0, 20 - days_ago * 0.3)
+                        # 雙背離加分（同時有S和L）
+                        summary = str(row.get("訊號摘要", ""))
+                        if ("MS" in summary or "WS" in summary) and ("ML" in summary or "WL" in summary):
+                            score += 10
+                        return round(score, 1)
 
                     if not scan_show.empty:
-                        display_cols = [c for c in ["股票代號", "股票名稱", "方向", "張數", "佔比%", "訊號摘要"] if c in scan_show.columns]
+                        scan_show["強度"] = scan_show.apply(calc_score, axis=1)
+                        sort_col = "金額(萬)" if "金額(萬)" in scan_show.columns else "張數"
+                        scan_show = scan_show.sort_values("強度", ascending=False)
+
+                    st.caption(f"{sel_broker}　近{recent_n}天　共 {len(scan_show)} 檔")
+
+                    if not scan_show.empty:
+                        display_cols = [c for c in ["股票代號", "股票名稱", "方向", "強度", "張數", "金額(萬)", "佔比%", "最新訊號日", "訊號摘要"] if c in scan_show.columns]
                         scan_show = scan_show[display_cols].reset_index(drop=True).copy()
                         scan_show.insert(0, "📊", False)
 
@@ -359,6 +397,8 @@ with st.sidebar:
                                         st.session_state["table_refresh_key"] = refresh_key + 1
                                         st.session_state.current_page = PAGE_T4
                                         st.rerun()
+                    else:
+                        st.caption(f"近 {recent_n} 天內無符合訊號，請調整天數")
 
     st.markdown("---")
     st.markdown("#### 🗺️ 頁面導航")
