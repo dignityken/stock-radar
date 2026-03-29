@@ -981,8 +981,9 @@ elif cur_page == PAGE_T4:
         st.session_state.t4_target_sid = sid
         if matched_br:
             st.session_state.t4_target_br = matched_br
-        # 記錄要強制切換的週期，在 radio 渲染後套用
+        # 強制覆蓋 drawn_period，auto_draw 繪圖時直接用
         st.session_state["vip_force_period"] = period
+        st.session_state["drawn_period"] = period
         st.session_state.auto_draw = True
         st.rerun()
 
@@ -1202,17 +1203,7 @@ elif cur_page == PAGE_T4:
 
     c_per, c_days, c_start, c_hval, c_hadd, c_click, c_hclr, c_draw2 = st.columns([1.5, 1.5, 1.5, 1.5, 1, 1, 1, 1])
     with c_per:
-        # VIP 清單帶入時，在 radio 渲染前先設好預設值
-        if "vip_force_period" in st.session_state:
-            force_p = st.session_state.pop("vip_force_period")
-            period_options = ["日", "週", "月"]
-            force_idx = period_options.index(force_p) if force_p in period_options else 0
-            # 用 index 參數強制選中，key 不能直接改所以不設 key
-            t4_period = st.radio("週期", period_options, index=force_idx, horizontal=True)
-            # 同步更新 t4_period_bot 讓下次 rerun 記住
-            st.session_state["t4_period_bot"] = force_p
-        else:
-            t4_period = st.radio("週期", ["日", "週", "月"], horizontal=True, key="t4_period_bot")
+        t4_period = st.radio("週期", ["日", "週", "月"], horizontal=True, key="t4_period_bot")
     with c_days:
         days_mode = st.selectbox("顯示K棒數", [300, 500, 1000, "自訂..."])
         if days_mode == "自訂...":
@@ -1257,6 +1248,10 @@ elif cur_page == PAGE_T4:
 
     if st.session_state.get('show_chart', False):
         if t4_period != st.session_state.get('drawn_period', '日') or t4_start_val != st.session_state.get('drawn_start_year', '2015-01-01'):
+            # 若來自 VIP 清單，優先用強制週期；否則用 radio 選的週期
+        if "vip_force_period" in st.session_state:
+            st.session_state.drawn_period = st.session_state.pop("vip_force_period")
+        else:
             st.session_state.drawn_period = t4_period
             st.session_state.drawn_start_year = t4_start_val
             st.session_state.chart_render_key += 1
@@ -1270,7 +1265,11 @@ elif cur_page == PAGE_T4:
         st.session_state.t4_target_br = t4_br_name
         st.session_state.drawn_sid = t4_sid
         st.session_state.drawn_br_name = t4_br_name
-        st.session_state.drawn_period = t4_period
+        # 若來自 VIP 清單，優先用強制週期；否則用 radio 選的週期
+        if "vip_force_period" in st.session_state:
+            st.session_state.drawn_period = st.session_state.pop("vip_force_period")
+        else:
+            st.session_state.drawn_period = t4_period
         st.session_state.drawn_days = t4_days
         st.session_state.drawn_start_year = t4_start_val
 
