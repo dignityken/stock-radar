@@ -972,17 +972,15 @@ elif cur_page == PAGE_T4:
 
     # 處理來自 VIP 掃描清單的跳轉（需在 BROKER_MAP 建立後執行）
     if st.session_state.get("vip_pending_sid"):
-        sid    = st.session_state.pop("vip_pending_sid")
-        br     = st.session_state.pop("vip_pending_br", "")
-        period = st.session_state.pop("vip_pending_period", "日")
-        st.write(f"⚡ pending 執行中！period={period}")
+        sid = st.session_state.pop("vip_pending_sid")
+        br  = st.session_state.pop("vip_pending_br", "")
+        st.session_state.pop("vip_pending_period", None)
         clean_br = br.replace("亚", "亞").strip()
         matched_br = clean_br if clean_br in BROKER_MAP else next(
             (k for k in BROKER_MAP if clean_br in k or k in clean_br), None)
         st.session_state.t4_target_sid = sid
         if matched_br:
             st.session_state.t4_target_br = matched_br
-        st.session_state.drawn_period = period
         st.session_state.auto_draw = True
         st.rerun()
 
@@ -1259,7 +1257,6 @@ elif cur_page == PAGE_T4:
         st.session_state.drawn_start_year = t4_start_val
 
     elif st.session_state.auto_draw:
-        # 自動繪圖（含 VIP 帶入）：用已設好的 drawn_period，不覆蓋
         st.session_state.auto_draw = False
         st.session_state.show_chart = True
         st.session_state.chart_render_key += 1
@@ -1267,6 +1264,8 @@ elif cur_page == PAGE_T4:
         st.session_state.t4_target_br = t4_br_name
         st.session_state.drawn_sid = t4_sid
         st.session_state.drawn_br_name = t4_br_name
+        # 保留使用者上次選的週期，不強制覆蓋
+        st.session_state.drawn_period = t4_period
         st.session_state.drawn_days = t4_days
         st.session_state.drawn_start_year = t4_start_val
 
@@ -1283,7 +1282,7 @@ elif cur_page == PAGE_T4:
         drawn_br_name = st.session_state.drawn_br_name
         drawn_br_id = BROKER_MAP[drawn_br_name]['br_id']
         drawn_period = st.session_state.drawn_period
-        st.caption(f"🔍 debug: drawn_period={drawn_period}, t4_period={t4_period}")
+
         drawn_days = st.session_state.drawn_days
         drawn_start_year = st.session_state.drawn_start_year
 
