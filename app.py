@@ -739,7 +739,7 @@ if cur_page == PAGE_T1:
         col_s = '賣出金額' if '金額' in t1_u else '賣出張數'
         exclude_t1 = {'📊 K線圖', 'K線圖', '分點明細', 'extracted_stock_id'}
         sort_opts_t1 = [c for c in st.session_state.t1_buy_df.columns if c not in exclude_t1] if not st.session_state.t1_buy_df.empty else [col_b]
-        t1_sort = st.selectbox("排序依據", sort_opts_t1, index=sort_opts_t1.index(col_b) if col_b in sort_opts_t1 else 0, key="t1_sort_col")
+        t1_sort = st.selectbox("排序依據", sort_opts_t1, key="t1_sort_col")
         st.markdown(f"### 🔴 買進 - 共 {len(st.session_state.t1_buy_df)} 檔")
         display_table_with_button(st.session_state.t1_buy_df.sort_values(by=t1_sort, ascending=False).head(999 if show_full else 10), "t1_buy")
         st.markdown(f"### 🟢 賣出 - 共 {len(st.session_state.t1_sell_df)} 檔")
@@ -840,7 +840,7 @@ elif cur_page == PAGE_T2:
 
         exclude_t2 = {'📊 K線圖', '網頁明細'}
         sort_opts_t2 = [c for c in st.session_state.t2_buy_df.columns if c not in exclude_t2] if not st.session_state.t2_buy_df.empty else ['買']
-        t2_sort = st.selectbox("排序依據", sort_opts_t2, index=sort_opts_t2.index('買') if '買' in sort_opts_t2 else 0, key="t2_sort_col")
+        t2_sort = st.selectbox("排序依據", sort_opts_t2, key="t2_sort_col")
         st.subheader("🔴 買進分點")
         display_table_with_button_t2(st.session_state.t2_buy_df.sort_values(t2_sort, ascending=False).head(999 if show_full_t2 else 10), "t2_buy")
         st.subheader("🟢 賣出分點")
@@ -973,7 +973,7 @@ elif cur_page == PAGE_T3:
         st.caption(f"📌 區間：{sd_s} ~ {ed_s} | 單位：{t3_u}")
         exclude_t3 = {'📊 K線圖', 'K線圖', '分點明細', 'extracted_stock_id'}
         sort_opts_t3 = [c for c in st.session_state.t3_buy_df.columns if c not in exclude_t3] if not st.session_state.t3_buy_df.empty else [col_buy]
-        t3_sort = st.selectbox("排序依據", sort_opts_t3, index=sort_opts_t3.index(col_buy) if col_buy in sort_opts_t3 else 0, key="t3_sort_col")
+        t3_sort = st.selectbox("排序依據", sort_opts_t3, key="t3_sort_col")
         st.markdown(f"### 🔴 該分點買進 - 共 {len(st.session_state.t3_buy_df)} 檔")
         display_table_with_button_t3(st.session_state.t3_buy_df.sort_values(by=t3_sort, ascending=False).head(999 if show_full_t3 else 10), "t3_buy")
         st.markdown(f"### 🟢 該分點賣出 - 共 {len(st.session_state.t3_sell_df)} 檔")
