@@ -354,9 +354,6 @@ with st.sidebar:
                 col_dir = st.selectbox("方向", ["全部", "買進", "賣出"], key="scan_dir_filter")
                 min_score = st.slider("最低強度", 0, 120, 60, step=5, key="scan_min_score")
 
-                broker_list = ["全部分點"] + sorted(scan_df["分點名稱"].dropna().unique().tolist()) if "分點名稱" in scan_df.columns else ["全部分點"]
-                sel_broker = st.selectbox("分點過濾", broker_list, key="scan_broker_sel")
-
                 # ── 先套用日期、方向、強度篩選（不含分點）──
                 scan_filtered = scan_df.copy()
                 scan_filtered = scan_filtered[scan_filtered["最新訊號日"].apply(lambda d: d is not None and d >= cutoff)]
