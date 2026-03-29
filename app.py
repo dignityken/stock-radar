@@ -1248,10 +1248,6 @@ elif cur_page == PAGE_T4:
 
     if st.session_state.get('show_chart', False):
         if t4_period != st.session_state.get('drawn_period', '日') or t4_start_val != st.session_state.get('drawn_start_year', '2015-01-01'):
-            # 若來自 VIP 清單，優先用強制週期；否則用 radio 選的週期
-        if "vip_force_period" in st.session_state:
-            st.session_state.drawn_period = st.session_state.pop("vip_force_period")
-        else:
             st.session_state.drawn_period = t4_period
             st.session_state.drawn_start_year = t4_start_val
             st.session_state.chart_render_key += 1
