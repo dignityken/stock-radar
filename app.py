@@ -1265,11 +1265,13 @@ elif cur_page == PAGE_T4:
         st.session_state.drawn_br_name = t4_br_name
         # 若來自 VIP 清單，優先用強制週期；否則用 radio 選的週期
         if "vip_force_period" in st.session_state:
-            st.session_state.drawn_period = st.session_state.pop("vip_force_period")
+            forced = st.session_state.pop("vip_force_period")
+            st.session_state.drawn_period = forced
         else:
             st.session_state.drawn_period = t4_period
         st.session_state.drawn_days = t4_days
         st.session_state.drawn_start_year = t4_start_val
+        st.rerun()
 
     if st.session_state.get('show_chart', False):
         drawn_sid_clean = st.session_state.drawn_sid.strip().upper()
