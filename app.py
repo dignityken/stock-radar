@@ -368,8 +368,17 @@ with st.sidebar:
                 scan_df["符合度"] = scan_df.apply(calc_signal_match, axis=1)
 
                 # ── 篩選條件 ──
-                max_days = 730 if kline_period == "週" else 180
-                default_days = 120 if kline_period == "週" else 60
+                # 動態計算最大天數（從今天到資料最舊的訊號日期）
+                if not scan_df.empty and "最新訊號日" in scan_df.columns:
+                    oldest = scan_df["最新訊號日"].dropna().min()
+                    if oldest:
+                        max_days = (datetime.date.today() - oldest).days + 1
+                        max_days = max(max_days, 7)
+                    else:
+                        max_days = 730 if kline_period == "週" else 180
+                else:
+                    max_days = 730 if kline_period == "週" else 180
+                default_days = min(120 if kline_period == "週" else 60, max_days)
                 recent_n = st.slider("最近幾天", 7, max_days, default_days, step=7, key=f"scan_recent_days_{kline_period}")
                 cutoff = datetime.date.today() - datetime.timedelta(days=recent_n)
 
@@ -400,7 +409,10 @@ with st.sidebar:
 
                 sort_options = [c for c in ["強度", "符合度", "張數", "金額(萬)", "佔比%", "最新訊號日"] if c in scan_show.columns]
                 sort_col = st.selectbox("排序依據", sort_options, key="scan_sort_col")
-                scan_show = scan_show.sort_values(sort_col, ascending=False)
+                if sort_col in scan_show.columns:
+                    scan_show = scan_show.sort_values(sort_col, ascending=False)
+                else:
+                    scan_show = scan_show.sort_values("強度", ascending=False)
 
                 st.caption(f"近{recent_n}天　強度≥{min_score}　共 **{len(scan_show)}** 檔")
 
