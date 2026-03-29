@@ -1262,7 +1262,8 @@ elif cur_page == PAGE_T4:
         st.session_state.t4_target_br = t4_br_name
         st.session_state.drawn_sid = t4_sid
         st.session_state.drawn_br_name = t4_br_name
-        st.session_state.drawn_period = t4_period
+        # 直接從 session state 讀週期，確保 VIP 清單帶入的週期生效
+        st.session_state.drawn_period = st.session_state.get("t4_period_bot", t4_period)
         st.session_state.drawn_days = t4_days
         st.session_state.drawn_start_year = t4_start_val
 
