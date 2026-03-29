@@ -350,6 +350,23 @@ with st.sidebar:
 
                 scan_df["強度"] = scan_df.apply(calc_score, axis=1)
 
+                def calc_signal_match(row):
+                    summary = str(row.get("訊號摘要", ""))
+                    direction = str(row.get("方向", ""))
+                    has_W = "WS" in summary or "WL" in summary
+                    has_M = "MS" in summary or "ML" in summary
+                    is_buy  = direction == "買進"
+                    is_sell = direction == "賣出"
+                    if (has_W and is_buy) or (has_M and is_sell):
+                        return "🟢 最佳"
+                    elif has_M and is_buy:
+                        return "🟡 參考"
+                    elif has_W and is_sell:
+                        return "🔴 注意"
+                    return "⚪ 未知"
+
+                scan_df["符合度"] = scan_df.apply(calc_signal_match, axis=1)
+
                 # ── 篩選條件 ──
                 max_days = 730 if kline_period == "週" else 180
                 default_days = 120 if kline_period == "週" else 60
@@ -381,14 +398,14 @@ with st.sidebar:
                     scan_show = scan_show[scan_show["分點名稱"] == real_broker]
                 scan_show = scan_show.sort_values("強度", ascending=False)
 
-                sort_options = [c for c in ["強度", "張數", "金額(萬)", "佔比%", "最新訊號日"] if c in scan_show.columns]
+                sort_options = [c for c in ["強度", "符合度", "張數", "金額(萬)", "佔比%", "最新訊號日"] if c in scan_show.columns]
                 sort_col = st.selectbox("排序依據", sort_options, key="scan_sort_col")
                 scan_show = scan_show.sort_values(sort_col, ascending=False)
 
                 st.caption(f"近{recent_n}天　強度≥{min_score}　共 **{len(scan_show)}** 檔")
 
                 if not scan_show.empty:
-                    display_cols = [c for c in ["股票代號", "股票名稱", "分點名稱", "方向", "強度", "張數", "金額(萬)", "佔比%", "最新訊號日", "訊號摘要"] if c in scan_show.columns]
+                    display_cols = [c for c in ["股票代號", "股票名稱", "分點名稱", "方向", "符合度", "強度", "張數", "金額(萬)", "佔比%", "最新訊號日", "訊號摘要"] if c in scan_show.columns]
                     scan_show = scan_show[display_cols].reset_index(drop=True).copy()
                     scan_show.insert(0, "📊", False)
 
