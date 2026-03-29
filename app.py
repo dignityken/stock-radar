@@ -351,7 +351,9 @@ with st.sidebar:
                 scan_df["強度"] = scan_df.apply(calc_score, axis=1)
 
                 # ── 篩選條件 ──
-                recent_n = st.slider("最近幾天", 7, 180, 60, step=7, key="scan_recent_days")
+                max_days = 730 if kline_period == "週" else 180
+                default_days = 120 if kline_period == "週" else 60
+                recent_n = st.slider("最近幾天", 7, max_days, default_days, step=7, key=f"scan_recent_days_{kline_period}")
                 cutoff = datetime.date.today() - datetime.timedelta(days=recent_n)
 
                 col_dir = st.selectbox("方向", ["全部", "買進", "賣出"], key="scan_dir_filter")
