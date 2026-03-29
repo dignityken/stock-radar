@@ -1293,10 +1293,12 @@ elif cur_page == PAGE_T4:
         st.session_state.drawn_start_year = t4_start_val
 
     elif st.session_state.get('show_chart', False):
-        # 只有下載範圍改變才自動重繪，週期改變需手動點繪圖按鈕
-        if t4_start_val != st.session_state.get('drawn_start_year', '2015-01-01'):
-            st.session_state.drawn_start_year = t4_start_val
+        # 週期或下載範圍改變時自動重繪
+        period_changed = t4_period != st.session_state.get('drawn_period', '日')
+        start_changed  = t4_start_val != st.session_state.get('drawn_start_year', '2015-01-01')
+        if period_changed or start_changed:
             st.session_state.drawn_period = t4_period
+            st.session_state.drawn_start_year = t4_start_val
             st.session_state.chart_render_key += 1
             st.rerun()
 
