@@ -1284,6 +1284,7 @@ elif cur_page == PAGE_T4:
         drawn_br_name = st.session_state.drawn_br_name
         drawn_br_id = BROKER_MAP[drawn_br_name]['br_id']
         drawn_period = st.session_state.drawn_period
+        st.caption(f"🔍 debug: drawn_period={drawn_period}, t4_period={t4_period}")
         drawn_days = st.session_state.drawn_days
         drawn_start_year = st.session_state.drawn_start_year
 
