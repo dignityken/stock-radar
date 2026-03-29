@@ -727,7 +727,6 @@ if cur_page == PAGE_T1:
                             sid_clicked = df_show.iloc[row_idx]['extracted_stock_id']
                             st.session_state.t4_target_sid = sid_clicked
                             st.session_state.t4_target_br = st.session_state.t1_last_br
-                            st.session_state.drawn_period = t4_period if 't4_period_bot' not in st.session_state else st.session_state.get('t4_period_bot', '日')
                             st.session_state.auto_draw = True
                             st.session_state.current_page = PAGE_T4
                             st.rerun()
