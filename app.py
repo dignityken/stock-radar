@@ -407,6 +407,7 @@ with st.sidebar:
                                 if sid and br:
                                     st.session_state["vip_pending_sid"] = sid
                                     st.session_state["vip_pending_br"]  = br
+                                    st.session_state["drawn_period"] = kline_period
                                     st.session_state["table_refresh_key"] = refresh_key + 1
                                     st.session_state.current_page = PAGE_T4
                                     st.rerun()
@@ -1264,8 +1265,7 @@ elif cur_page == PAGE_T4:
         st.session_state.t4_target_br = t4_br_name
         st.session_state.drawn_sid = t4_sid
         st.session_state.drawn_br_name = t4_br_name
-        # 保留使用者上次選的週期，不強制覆蓋
-        st.session_state.drawn_period = t4_period
+        # 不動 drawn_period，保留勾選時已設好的值
         st.session_state.drawn_days = t4_days
         st.session_state.drawn_start_year = t4_start_val
 
