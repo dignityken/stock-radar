@@ -975,6 +975,7 @@ elif cur_page == PAGE_T4:
         sid    = st.session_state.pop("vip_pending_sid")
         br     = st.session_state.pop("vip_pending_br", "")
         period = st.session_state.pop("vip_pending_period", "日")
+        st.write(f"⚡ pending 執行中！period={period}")
         clean_br = br.replace("亚", "亞").strip()
         matched_br = clean_br if clean_br in BROKER_MAP else next(
             (k for k in BROKER_MAP if clean_br in k or k in clean_br), None)
