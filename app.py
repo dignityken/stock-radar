@@ -438,21 +438,17 @@ with st.sidebar:
                     display_cols = [c for c in ["股票代號", "股票名稱", "分點名稱", "方向", "符合度", "強度", "張數", "金額(萬)", "佔比%", "最新訊號日", "訊號摘要"] if c in scan_show.columns]
                     scan_show = scan_show[display_cols].reset_index(drop=True).copy()
 
-                    # ── [改動②] 加入兩個獨立 checkbox 欄位 ──
-                    # 「📊」原有欄位：勾選 → 單筆立即跳轉繪圖（原邏輯不動）
-                    # 「🗂️」新欄位：勾選 → 批次加入工作組
-                    scan_show.insert(0, "📊", False)   # 原有：單筆跳轉
-                    scan_show.insert(1, "🗂️", False)   # 新增：加入工作組
+                    # ── 「📊 載入K線」仍用 data_editor（跳轉 TAB4，必須 rerun）──
+                    # ── 「🗂️ 加入工作組」改用 session_state + st.checkbox，不觸發全頁 rerun ──
+                    scan_show_draw = scan_show.copy()
+                    scan_show_draw.insert(0, "📊", False)
 
                     refresh_key = st.session_state.get("table_refresh_key", 0)
                     scan_editor_key = f"scan_editor_{refresh_key}"
                     st.data_editor(
-                        scan_show,
+                        scan_show_draw,
                         hide_index=True,
-                        column_config={
-                            "📊": st.column_config.CheckboxColumn("載入K線"),
-                            "🗂️": st.column_config.CheckboxColumn("加入工作組"),
-                        },
+                        column_config={"📊": st.column_config.CheckboxColumn("載入K線")},
                         use_container_width=True,
                         key=scan_editor_key
                     )
@@ -475,27 +471,42 @@ with st.sidebar:
                                     st.session_state.current_page = PAGE_T4
                                     st.rerun()
 
-                    # ── [改動③] 新增：🗂️ 批次加入工作組按鈕 ──
+                    # ── 🗂️ 工作組勾選：用 session state 存，不觸發不必要 rerun ──
+                    wg_sel_key = f"vip_wg_sel_{refresh_key}"
+                    if wg_sel_key not in st.session_state:
+                        st.session_state[wg_sel_key] = {}
+
+                    st.caption("勾選後點「加入工作組」：")
+                    n_cols = 2
+                    rows_per_col = max(1, (len(scan_show) + n_cols - 1) // n_cols)
+                    check_cols = st.columns(n_cols)
+                    for row_idx, row in scan_show.iterrows():
+                        col_idx = row_idx // rows_per_col
+                        if col_idx >= n_cols: col_idx = n_cols - 1
+                        label = f"{row.get('股票代號','')} {row.get('股票名稱','')} | {row.get('分點名稱','')}"
+                        cur_val = st.session_state[wg_sel_key].get(row_idx, False)
+                        new_val = check_cols[col_idx].checkbox(label, value=cur_val, key=f"vip_wg_cb_{refresh_key}_{row_idx}")
+                        st.session_state[wg_sel_key][row_idx] = new_val
+
                     if st.button("🗂️ 加入工作組", key=f"wg_add_btn_{refresh_key}", use_container_width=True):
-                        if scan_editor_key in st.session_state:
-                            edits_wg = st.session_state[scan_editor_key].get("edited_rows", {})
-                            added = 0
-                            for row_idx, changes in edits_wg.items():
-                                if changes.get("🗂️", False):
-                                    row = scan_show.iloc[row_idx]
-                                    sid = str(row.get("股票代號", "")).strip()
-                                    br  = str(row.get("分點名稱", "")).strip()
-                                    if not br and sel_broker != "全部分點":
-                                        br = sel_broker.split("（")[0]
-                                    if sid and br:
-                                        entry = {"股票代號": sid, "追蹤分點": br}
-                                        if entry not in st.session_state.working_group:
-                                            st.session_state.working_group.append(entry)
-                                            added += 1
-                            if added:
-                                st.success(f"✅ 已加入 {added} 檔到工作組")
-                            else:
-                                st.warning("請先勾選 🗂️ 欄位的股票")
+                        added = 0
+                        for row_idx, checked in st.session_state[wg_sel_key].items():
+                            if checked:
+                                row = scan_show.iloc[row_idx]
+                                sid = str(row.get("股票代號", "")).strip()
+                                br  = str(row.get("分點名稱", "")).strip()
+                                if not br and sel_broker != "全部分點":
+                                    br = sel_broker.split("（")[0]
+                                if sid and br:
+                                    entry = {"股票代號": sid, "追蹤分點": br}
+                                    if entry not in st.session_state.working_group:
+                                        st.session_state.working_group.append(entry)
+                                        added += 1
+                        if added:
+                            st.success(f"✅ 已加入 {added} 檔到工作組")
+                            st.session_state[wg_sel_key] = {}  # 清空勾選
+                        else:
+                            st.warning("請先勾選要加入的股票")
                 else:
                     st.caption("無符合條件的資料，請調整篩選條件")
 
@@ -824,17 +835,10 @@ if cur_page == PAGE_T1:
                             st.rerun()
 
         col_b = '買進金額' if '金額' in t1_u else '買進張數'
-        col_s = '賣出金額' if '金額' in t1_u else '賣出張數'
-        exclude_t1 = {'📊 K線圖', 'K線圖', '分點明細', 'extracted_stock_id'}
-        sort_opts_t1 = [c for c in st.session_state.t1_buy_df.columns if c not in exclude_t1] if not st.session_state.t1_buy_df.empty else [col_b]
-        saved_t1 = st.session_state.get("t1_sort_val", col_b)
-        default_t1 = saved_t1 if saved_t1 in sort_opts_t1 else sort_opts_t1[0]
-        t1_sort = st.selectbox("排序依據", sort_opts_t1, index=sort_opts_t1.index(default_t1), key="t1_sort_col")
-        st.session_state["t1_sort_val"] = t1_sort
         st.markdown(f"### 🔴 買進 - 共 {len(st.session_state.t1_buy_df)} 檔")
-        display_table_with_button(st.session_state.t1_buy_df.sort_values(by=t1_sort, ascending=False).head(999 if show_full else 10), "t1_buy")
+        display_table_with_button(st.session_state.t1_buy_df.sort_values(by=col_b, ascending=False).head(999 if show_full else 10), "t1_buy")
         st.markdown(f"### 🟢 賣出 - 共 {len(st.session_state.t1_sell_df)} 檔")
-        display_table_with_button(st.session_state.t1_sell_df.sort_values(by=t1_sort, ascending=False).head(999 if show_full else 10), "t1_sell")
+        display_table_with_button(st.session_state.t1_sell_df.sort_values(by=col_b, ascending=False).head(999 if show_full else 10), "t1_sell")
 
 # ==========================================
 # 📊 頁面二：股票代號（原版不動）
@@ -929,16 +933,10 @@ elif cur_page == PAGE_T2:
                             st.session_state.current_page = PAGE_T4
                             st.rerun()
 
-        exclude_t2 = {'📊 K線圖', '網頁明細'}
-        sort_opts_t2 = [c for c in st.session_state.t2_buy_df.columns if c not in exclude_t2] if not st.session_state.t2_buy_df.empty else ['買']
-        saved_t2 = st.session_state.get("t2_sort_val", "買")
-        default_t2 = saved_t2 if saved_t2 in sort_opts_t2 else sort_opts_t2[0]
-        t2_sort = st.selectbox("排序依據", sort_opts_t2, index=sort_opts_t2.index(default_t2), key="t2_sort_col")
-        st.session_state["t2_sort_val"] = t2_sort
         st.subheader("🔴 買進分點")
-        display_table_with_button_t2(st.session_state.t2_buy_df.sort_values(t2_sort, ascending=False).head(999 if show_full_t2 else 10), "t2_buy")
+        display_table_with_button_t2(st.session_state.t2_buy_df.sort_values('買', ascending=False).head(999 if show_full_t2 else 10), "t2_buy")
         st.subheader("🟢 賣出分點")
-        display_table_with_button_t2(st.session_state.t2_sell_df.sort_values(t2_sort, ascending=False).head(999 if show_full_t2 else 10), "t2_sell")
+        display_table_with_button_t2(st.session_state.t2_sell_df.sort_values('賣', ascending=False).head(999 if show_full_t2 else 10), "t2_sell")
 
 # ==========================================
 # 📍 頁面三：地緣券商（原版不動）
@@ -1065,16 +1063,10 @@ elif cur_page == PAGE_T3:
         sd_s, ed_s = t3_sd.strftime('%Y-%m-%d'), t3_ed.strftime('%Y-%m-%d')
         st.subheader(f"🕵️ 地緣雷達結果：{st.session_state.t3_last_br}")
         st.caption(f"📌 區間：{sd_s} ~ {ed_s} | 單位：{t3_u}")
-        exclude_t3 = {'📊 K線圖', 'K線圖', '分點明細', 'extracted_stock_id'}
-        sort_opts_t3 = [c for c in st.session_state.t3_buy_df.columns if c not in exclude_t3] if not st.session_state.t3_buy_df.empty else [col_buy]
-        saved_t3 = st.session_state.get("t3_sort_val", col_buy)
-        default_t3 = saved_t3 if saved_t3 in sort_opts_t3 else sort_opts_t3[0]
-        t3_sort = st.selectbox("排序依據", sort_opts_t3, index=sort_opts_t3.index(default_t3), key="t3_sort_col")
-        st.session_state["t3_sort_val"] = t3_sort
         st.markdown(f"### 🔴 該分點買進 - 共 {len(st.session_state.t3_buy_df)} 檔")
-        display_table_with_button_t3(st.session_state.t3_buy_df.sort_values(by=t3_sort, ascending=False).head(999 if show_full_t3 else 10), "t3_buy")
+        display_table_with_button_t3(st.session_state.t3_buy_df.sort_values(by=col_buy, ascending=False).head(999 if show_full_t3 else 10), "t3_buy")
         st.markdown(f"### 🟢 該分點賣出 - 共 {len(st.session_state.t3_sell_df)} 檔")
-        display_table_with_button_t3(st.session_state.t3_sell_df.sort_values(by=t3_sort, ascending=False).head(999 if show_full_t3 else 10), "t3_sell")
+        display_table_with_button_t3(st.session_state.t3_sell_df.sort_values(by=col_buy, ascending=False).head(999 if show_full_t3 else 10), "t3_sell")
 
 # ==========================================
 # 📊 頁面四：主力 K 線圖
@@ -1529,8 +1521,20 @@ elif cur_page == PAGE_T4:
 
                     # ── 疊加模式：抓額外分點資料並預處理堆疊 ──
                     stack_series_data = []   # [{br_name, color, data:[{time,value,base}]}]
-                    STACK_COLORS_POS = ['rgba(239,83,80,0.85)','rgba(255,180,0,0.85)','rgba(100,180,255,0.85)','rgba(200,100,255,0.85)','rgba(0,230,118,0.85)']
-                    STACK_COLORS_NEG = ['rgba(38,166,154,0.85)','rgba(180,120,0,0.85)','rgba(50,100,200,0.85)','rgba(140,50,200,0.85)','rgba(0,160,80,0.85)']
+                    STACK_COLORS_POS = [
+                        'rgba(239,83,80,0.9)',    # 紅
+                        'rgba(41,182,246,0.9)',   # 藍
+                        'rgba(255,193,7,0.9)',    # 黃
+                        'rgba(171,71,188,0.9)',   # 紫
+                        'rgba(102,187,106,0.9)',  # 綠
+                    ]
+                    STACK_COLORS_NEG = [
+                        'rgba(239,83,80,0.35)',   # 紅暗
+                        'rgba(41,182,246,0.35)',  # 藍暗
+                        'rgba(255,193,7,0.35)',   # 黃暗
+                        'rgba(171,71,188,0.35)',  # 紫暗
+                        'rgba(102,187,106,0.35)', # 綠暗
+                    ]
 
                     if is_stack_mode:
                         # 準備所有分點的買賣超，key=date_str
