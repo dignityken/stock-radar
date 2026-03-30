@@ -438,12 +438,11 @@ with st.sidebar:
                     display_cols = [c for c in ["股票代號", "股票名稱", "分點名稱", "方向", "符合度", "強度", "張數", "金額(萬)", "佔比%", "最新訊號日", "訊號摘要"] if c in scan_show.columns]
                     scan_show = scan_show[display_cols].reset_index(drop=True).copy()
 
+                    refresh_key = st.session_state.get("table_refresh_key", 0)
+
                     # ── 「📊 載入K線」仍用 data_editor（跳轉 TAB4，必須 rerun）──
-                    # ── 「🗂️ 加入工作組」改用 session_state + st.checkbox，不觸發全頁 rerun ──
                     scan_show_draw = scan_show.copy()
                     scan_show_draw.insert(0, "📊", False)
-
-                    refresh_key = st.session_state.get("table_refresh_key", 0)
                     scan_editor_key = f"scan_editor_{refresh_key}"
                     st.data_editor(
                         scan_show_draw,
@@ -452,8 +451,6 @@ with st.sidebar:
                         use_container_width=True,
                         key=scan_editor_key
                     )
-
-                    # ── 原有邏輯：📊 單筆跳轉 TAB4（完全不動）──
                     if scan_editor_key in st.session_state:
                         edits = st.session_state[scan_editor_key].get("edited_rows", {})
                         for row_idx, changes in edits.items():
@@ -471,42 +468,93 @@ with st.sidebar:
                                     st.session_state.current_page = PAGE_T4
                                     st.rerun()
 
-                    # ── 🗂️ 工作組勾選：用 session state 存，不觸發不必要 rerun ──
-                    wg_sel_key = f"vip_wg_sel_{refresh_key}"
-                    if wg_sel_key not in st.session_state:
-                        st.session_state[wg_sel_key] = {}
+                    # ── 「🗂️ 加入工作組」：純 HTML checkbox + JS 寫入隱藏 text_input ──
+                    # 勾選完全在 HTML 內部，不觸發 rerun
+                    # 點「🗂️ 加入工作組」→ JS 把選取清單寫入 hidden text_input → Streamlit rerun 一次
+                    wg_bridge_key = f"vip_wg_bridge_{refresh_key}"
+                    if wg_bridge_key not in st.session_state:
+                        st.session_state[wg_bridge_key] = ""
 
-                    st.caption("勾選後點「加入工作組」：")
-                    n_cols = 2
-                    rows_per_col = max(1, (len(scan_show) + n_cols - 1) // n_cols)
-                    check_cols = st.columns(n_cols)
+                    rows_json = []
                     for row_idx, row in scan_show.iterrows():
-                        col_idx = row_idx // rows_per_col
-                        if col_idx >= n_cols: col_idx = n_cols - 1
-                        label = f"{row.get('股票代號','')} {row.get('股票名稱','')} | {row.get('分點名稱','')}"
-                        cur_val = st.session_state[wg_sel_key].get(row_idx, False)
-                        new_val = check_cols[col_idx].checkbox(label, value=cur_val, key=f"vip_wg_cb_{refresh_key}_{row_idx}")
-                        st.session_state[wg_sel_key][row_idx] = new_val
+                        sid = str(row.get("股票代號", "")).strip()
+                        sname = str(row.get("股票名稱", "")).strip()
+                        br = str(row.get("分點名稱", "")).strip()
+                        if not br and sel_broker != "全部分點":
+                            br = sel_broker.split("（")[0]
+                        match = str(row.get("符合度", ""))
+                        rows_json.append({"idx": row_idx, "sid": sid, "sname": sname, "br": br, "match": match})
 
-                    if st.button("🗂️ 加入工作組", key=f"wg_add_btn_{refresh_key}", use_container_width=True):
+                    rows_js = json.dumps(rows_json, ensure_ascii=False)
+                    html_h = min(56 + len(rows_json) * 24, 480)
+                    html_wg = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>
+*{{box-sizing:border-box;margin:0;padding:0;}}
+body{{font-family:"Microsoft JhengHei",sans-serif;background:transparent;padding:2px 0;}}
+.grid{{display:grid;grid-template-columns:1fr 1fr;gap:1px 4px;}}
+.row{{display:flex;align-items:center;gap:5px;padding:3px 3px;border-radius:3px;cursor:pointer;}}
+.row:hover{{background:rgba(255,255,255,0.07);}}
+.row input{{accent-color:#4e8cff;width:13px;height:13px;cursor:pointer;flex-shrink:0;}}
+.lbl{{font-size:11px;color:#bcc4d0;line-height:1.3;cursor:pointer;}}
+#btn{{margin-top:5px;width:100%;padding:6px 0;background:#1565C0;color:#fff;border:none;
+      border-radius:5px;font-size:12px;font-weight:bold;cursor:pointer;
+      font-family:"Microsoft JhengHei",sans-serif;}}
+#btn:hover{{background:#0d47a1;}}
+#msg{{font-size:11px;color:#90caf9;text-align:center;margin-top:3px;min-height:14px;}}
+</style></head><body>
+<div class="grid" id="g"></div>
+<button id="btn">🗂️ 加入工作組</button>
+<div id="msg"></div>
+<script>
+const rows={rows_js};
+const g=document.getElementById('g');
+rows.forEach(r=>{{
+  const d=document.createElement('div');
+  d.className='row';
+  d.innerHTML=`<input type="checkbox" id="c${{r.idx}}"><label class="lbl" for="c${{r.idx}}">${{r.sid}} ${{r.sname}}｜${{r.br}} ${{r.match}}</label>`;
+  g.appendChild(d);
+}});
+document.getElementById('btn').onclick=()=>{{
+  const sel=rows.filter(r=>document.getElementById('c'+r.idx)?.checked);
+  if(!sel.length){{document.getElementById('msg').textContent='請先勾選股票';return;}}
+  const payload=sel.map(r=>r.sid+'||'+r.br).join(';;');
+  // 找到 parent 頁面中 key 含 wg_bridge 的 input 並寫入值觸發 rerun
+  try{{
+    const inputs=[...window.parent.document.querySelectorAll('input[type=text]')];
+    const target=inputs.find(el=>el.value!==undefined && el.getAttribute('aria-label')==='wg_bridge_input');
+    if(target){{
+      const nativeInput=Object.getOwnPropertyDescriptor(window.parent.HTMLInputElement.prototype,'value');
+      nativeInput.set.call(target,payload);
+      target.dispatchEvent(new Event('input',{{bubbles:true}}));
+      target.dispatchEvent(new Event('change',{{bubbles:true}}));
+    }}
+  }}catch(e){{}}
+  sel.forEach(r=>{{const c=document.getElementById('c'+r.idx);if(c)c.checked=false;}});
+  document.getElementById('msg').textContent='✅ 送出 '+sel.length+' 筆，正在同步...';
+}};
+</script></body></html>"""
+
+                    components.html(html_wg, height=html_h, scrolling=False)
+
+                    # 橋接 input：JS 找到這個 input 並寫入 payload 觸發 rerun
+                    bridge_val = st.text_input("wg_bridge_input", value="",
+                                               key=wg_bridge_key, label_visibility="collapsed",
+                                               placeholder="")
+                    # 當 bridge 有值時（JS 寫入觸發的 rerun）→ 加入工作組
+                    raw = st.session_state.get(wg_bridge_key, "").strip()
+                    if raw:
                         added = 0
-                        for row_idx, checked in st.session_state[wg_sel_key].items():
-                            if checked:
-                                row = scan_show.iloc[row_idx]
-                                sid = str(row.get("股票代號", "")).strip()
-                                br  = str(row.get("分點名稱", "")).strip()
-                                if not br and sel_broker != "全部分點":
-                                    br = sel_broker.split("（")[0]
-                                if sid and br:
-                                    entry = {"股票代號": sid, "追蹤分點": br}
-                                    if entry not in st.session_state.working_group:
-                                        st.session_state.working_group.append(entry)
-                                        added += 1
+                        for item_str in raw.split(";;"):
+                            parts = item_str.split("||")
+                            if len(parts) == 2:
+                                s, b = parts[0].strip(), parts[1].strip()
+                                entry = {"股票代號": s, "追蹤分點": b}
+                                if s and b and entry not in st.session_state.working_group:
+                                    st.session_state.working_group.append(entry)
+                                    added += 1
+                        st.session_state[wg_bridge_key] = ""
                         if added:
                             st.success(f"✅ 已加入 {added} 檔到工作組")
-                            st.session_state[wg_sel_key] = {}  # 清空勾選
-                        else:
-                            st.warning("請先勾選要加入的股票")
                 else:
                     st.caption("無符合條件的資料，請調整篩選條件")
 
@@ -1521,19 +1569,20 @@ elif cur_page == PAGE_T4:
 
                     # ── 疊加模式：抓額外分點資料並預處理堆疊 ──
                     stack_series_data = []   # [{br_name, color, data:[{time,value,base}]}]
+                    # 每個分點一個識別色：正值亮、負值深色實體（不半透明）
                     STACK_COLORS_POS = [
-                        'rgba(239,83,80,0.9)',    # 紅
-                        'rgba(41,182,246,0.9)',   # 藍
-                        'rgba(255,193,7,0.9)',    # 黃
-                        'rgba(171,71,188,0.9)',   # 紫
-                        'rgba(102,187,106,0.9)',  # 綠
+                        'rgba(239,83,80,1)',    # 紅
+                        'rgba(41,182,246,1)',   # 藍
+                        'rgba(255,193,7,1)',    # 黃
+                        'rgba(171,71,188,1)',   # 紫
+                        'rgba(102,187,106,1)',  # 綠
                     ]
                     STACK_COLORS_NEG = [
-                        'rgba(239,83,80,0.35)',   # 紅暗
-                        'rgba(41,182,246,0.35)',  # 藍暗
-                        'rgba(255,193,7,0.35)',   # 黃暗
-                        'rgba(171,71,188,0.35)',  # 紫暗
-                        'rgba(102,187,106,0.35)', # 綠暗
+                        'rgba(120,20,20,1)',    # 深紅
+                        'rgba(10,80,130,1)',    # 深藍
+                        'rgba(140,100,0,1)',    # 深黃/棕
+                        'rgba(80,20,100,1)',    # 深紫
+                        'rgba(30,90,40,1)',     # 深綠
                     ]
 
                     if is_stack_mode:
