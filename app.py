@@ -332,40 +332,51 @@ with st.sidebar:
 
                 scan_df["最新訊號日"] = scan_df["訊號摘要"].apply(get_latest_signal_date)
 
-                # ── 強度分數 ──
-                def calc_score(row):
-                    score = 0
-                    score += min(float(row.get("佔比%", 0)), 100) * 0.4
-                    has_amt = "金額(萬)" in row.index and row.get("金額(萬)", 0)
-                    scale = float(row.get("金額(萬)", 0)) if has_amt else float(row.get("張數", 0)) / 10
-                    score += min(scale / 500, 1) * 40
-                    latest = row.get("最新訊號日")
-                    if latest:
-                        days_ago = (datetime.date.today() - latest).days
-                        score += max(0, 20 - days_ago * 0.3)
-                    summary = str(row.get("訊號摘要", ""))
-                    if ("MS" in summary or "WS" in summary) and ("ML" in summary or "WL" in summary):
-                        score += 10
-                    return round(score, 1)
+                # ── 強度分數 & 符合度（用 cache 避免每次 rerun 重算）──
+                @st.cache_data(ttl=300)
+                def enrich_scan_df(df_json: str, today_str: str):
+                    df = pd.read_json(df_json, orient='split')
+                    # 還原最新訊號日為 date 物件
+                    df["最新訊號日"] = df["最新訊號日"].apply(
+                        lambda x: datetime.datetime.strptime(x, "%Y-%m-%d").date() if isinstance(x, str) and x else None
+                    )
+                    today = datetime.datetime.strptime(today_str, "%Y-%m-%d").date()
+                    def _score(row):
+                        score = 0
+                        score += min(float(row.get("佔比%", 0) or 0), 100) * 0.4
+                        has_amt = "金額(萬)" in row.index and row.get("金額(萬)", 0)
+                        scale = float(row.get("金額(萬)", 0) or 0) if has_amt else float(row.get("張數", 0) or 0) / 10
+                        score += min(scale / 500, 1) * 40
+                        latest = row.get("最新訊號日")
+                        if latest:
+                            days_ago = (today - latest).days
+                            score += max(0, 20 - days_ago * 0.3)
+                        summary = str(row.get("訊號摘要", ""))
+                        if ("MS" in summary or "WS" in summary) and ("ML" in summary or "WL" in summary):
+                            score += 10
+                        return round(score, 1)
+                    def _match(row):
+                        summary = str(row.get("訊號摘要", ""))
+                        direction = str(row.get("方向", ""))
+                        has_W = "WS" in summary or "WL" in summary
+                        has_M = "MS" in summary or "ML" in summary
+                        is_buy  = direction == "買進"
+                        is_sell = direction == "賣出"
+                        if (has_W and is_buy) or (has_M and is_sell): return "🟢 最佳"
+                        elif has_M and is_buy: return "🟡 參考"
+                        elif has_W and is_sell: return "🔴 注意"
+                        return "⚪ 未知"
+                    df["強度"] = df.apply(_score, axis=1)
+                    df["符合度"] = df.apply(_match, axis=1)
+                    return df
 
-                scan_df["強度"] = scan_df.apply(calc_score, axis=1)
-
-                def calc_signal_match(row):
-                    summary = str(row.get("訊號摘要", ""))
-                    direction = str(row.get("方向", ""))
-                    has_W = "WS" in summary or "WL" in summary
-                    has_M = "MS" in summary or "ML" in summary
-                    is_buy  = direction == "買進"
-                    is_sell = direction == "賣出"
-                    if (has_W and is_buy) or (has_M and is_sell):
-                        return "🟢 最佳"
-                    elif has_M and is_buy:
-                        return "🟡 參考"
-                    elif has_W and is_sell:
-                        return "🔴 注意"
-                    return "⚪ 未知"
-
-                scan_df["符合度"] = scan_df.apply(calc_signal_match, axis=1)
+                today_str = datetime.date.today().strftime("%Y-%m-%d")
+                # 序列化時先把 date 轉 str 才能 JSON
+                df_for_cache = scan_df.copy()
+                df_for_cache["最新訊號日"] = df_for_cache["最新訊號日"].apply(
+                    lambda x: x.strftime("%Y-%m-%d") if x else None
+                )
+                scan_df = enrich_scan_df(df_for_cache.to_json(orient='split'), today_str)
 
                 # ── 篩選條件 ──
                 if not scan_df.empty and "最新訊號日" in scan_df.columns:
@@ -522,6 +533,9 @@ if 'drawn_days' not in st.session_state: st.session_state.drawn_days = 300
 # ── 工作組（session-only，重新整理即清空）──
 if 'working_group' not in st.session_state: st.session_state.working_group = []
 if 'wg_refresh_key' not in st.session_state: st.session_state.wg_refresh_key = 0
+# ── 疊加繪圖用的分點清單（從工作組多選觸發）──
+if 'stack_br_list' not in st.session_state: st.session_state.stack_br_list = []
+if 'stack_sid' not in st.session_state: st.session_state.stack_sid = ""
 
 if 'watchlist_loaded' not in st.session_state:
     st.session_state.watchlist = load_gsheet_watchlist(current_user)
@@ -1304,9 +1318,11 @@ elif cur_page == PAGE_T4:
             else:
                 wg_df = pd.DataFrame(st.session_state.working_group)
                 wg_df.insert(0, '載入', False)
+                wg_df.insert(1, '疊加', False)   # ← 新增：疊加繪圖勾選欄
                 wg_df['移除'] = False
                 wg_config = {
                     "載入": st.column_config.CheckboxColumn("載入繪圖"),
+                    "疊加": st.column_config.CheckboxColumn("📊 疊加"),
                     "移除": st.column_config.CheckboxColumn("移除"),
                     "股票代號": st.column_config.TextColumn(disabled=True),
                     "追蹤分點": st.column_config.TextColumn(disabled=True),
@@ -1314,7 +1330,7 @@ elif cur_page == PAGE_T4:
                 wg_editor_key = f"wg_editor_{st.session_state.wg_refresh_key}"
                 st.data_editor(wg_df, hide_index=True, column_config=wg_config, width="stretch", key=wg_editor_key)
 
-                col_wg1, col_wg2 = st.columns(2)
+                col_wg1, col_wg2, col_wg3 = st.columns(3)
                 with col_wg1:
                     if st.button("🗑️ 清空工作組", use_container_width=True):
                         st.session_state.working_group = []
@@ -1341,12 +1357,36 @@ elif cur_page == PAGE_T4:
                             st.success(f"✅ 已存入 {added} 檔到最愛清單")
                         else:
                             st.info("全部已在最愛清單中")
+                with col_wg3:
+                    # ── 疊加繪圖按鈕 ──
+                    if st.button("📊 疊加繪圖", use_container_width=True, type="primary"):
+                        if wg_editor_key in st.session_state:
+                            edits_stk = st.session_state[wg_editor_key].get('edited_rows', {})
+                            selected = [wg_df.iloc[ri] for ri, ch in edits_stk.items() if ch.get('疊加', False)]
+                            if not selected:
+                                st.warning("請先勾選 📊 疊加 欄位的分點（至少1筆）")
+                            else:
+                                sids = list({r['股票代號'] for r in selected})
+                                if len(sids) > 1:
+                                    st.warning(f"疊加只支援同一檔股票，目前勾選了 {sids}，請只勾選同一股票代號的分點。")
+                                else:
+                                    br_list = [r['追蹤分點'] for r in selected]
+                                    st.session_state.stack_sid = sids[0]
+                                    st.session_state.stack_br_list = br_list
+                                    st.session_state.t4_target_sid = sids[0]
+                                    st.session_state.t4_target_br = br_list[0]
+                                    st.session_state.auto_draw = True
+                                    st.session_state.wg_refresh_key += 1
+                                    st.rerun()
 
+                # ── 載入單筆 / 移除（只在有動作時 rerun）──
                 if wg_editor_key in st.session_state:
                     edits = st.session_state[wg_editor_key].get('edited_rows', {})
                     action_taken = False
                     for row_idx, changes in edits.items():
                         if changes.get('載入', False) == True:
+                            st.session_state.stack_br_list = []   # 清掉疊加狀態
+                            st.session_state.stack_sid = ""
                             st.session_state.t4_target_sid = wg_df.iloc[row_idx]['股票代號']
                             st.session_state.t4_target_br = wg_df.iloc[row_idx]['追蹤分點']
                             st.session_state.auto_draw = True
@@ -1468,6 +1508,14 @@ elif cur_page == PAGE_T4:
                 if df_k.empty:
                     st.error("找不到 K 線資料。")
                 else:
+                    # ── 判斷是否疊加模式 ──
+                    is_stack_mode = (
+                        st.session_state.get('stack_sid', '') == drawn_sid_clean
+                        and len(st.session_state.get('stack_br_list', [])) > 1
+                    )
+                    stack_br_list = st.session_state.get('stack_br_list', []) if is_stack_mode else []
+
+                    # ── 主分點資料（原有邏輯不動）──
                     df_broker, stock_name = get_history_and_name(drawn_sid_clean, drawn_br_id, drawn_start_year)
                     if df_broker.empty: st.info("近期無交易紀錄。")
                     df_merged = pd.merge(df_k, df_broker[['Date', '買賣超']], on='Date', how='left')
@@ -1478,6 +1526,51 @@ elif cur_page == PAGE_T4:
                     else: df_resampled = df_merged.copy()
                     df_resampled = df_resampled.dropna(subset=['Close']).reset_index()
                     df_resampled['Date_str'] = df_resampled['Date'].dt.strftime('%Y-%m-%d')
+
+                    # ── 疊加模式：抓額外分點資料並預處理堆疊 ──
+                    stack_series_data = []   # [{br_name, color, data:[{time,value,base}]}]
+                    STACK_COLORS_POS = ['rgba(239,83,80,0.85)','rgba(255,180,0,0.85)','rgba(100,180,255,0.85)','rgba(200,100,255,0.85)','rgba(0,230,118,0.85)']
+                    STACK_COLORS_NEG = ['rgba(38,166,154,0.85)','rgba(180,120,0,0.85)','rgba(50,100,200,0.85)','rgba(140,50,200,0.85)','rgba(0,160,80,0.85)']
+
+                    if is_stack_mode:
+                        # 準備所有分點的買賣超，key=date_str
+                        br_vols = {}  # {br_name: {date_str: vol}}
+                        for br_name_s in stack_br_list:
+                            br_id_s = BROKER_MAP.get(br_name_s, {}).get('br_id', '')
+                            if not br_id_s: continue
+                            df_b_s, _ = get_history_and_name(drawn_sid_clean, br_id_s, drawn_start_year)
+                            if df_b_s.empty: continue
+                            df_b_s = df_b_s[['Date','買賣超']].copy()
+                            df_b_s.set_index('Date', inplace=True)
+                            if drawn_period == "週":
+                                df_b_s = df_b_s.resample('W-FRI').sum()
+                            elif drawn_period == "月":
+                                df_b_s = df_b_s.resample('ME').sum()
+                            df_b_s = df_b_s.reset_index()
+                            df_b_s['Date_str'] = df_b_s['Date'].dt.strftime('%Y-%m-%d')
+                            br_vols[br_name_s] = dict(zip(df_b_s['Date_str'], df_b_s['買賣超']))
+
+                        # 取 df_resampled 的日期集合
+                        date_list = df_resampled['Date_str'].tolist()
+
+                        # 對每個日期，按分點順序計算正/負累積 base
+                        # 結果：每個分點一組 [{time, value, base}]
+                        for i, br_name_s in enumerate(stack_br_list):
+                            if br_name_s not in br_vols: continue
+                            vol_map = br_vols[br_name_s]
+                            color_pos = STACK_COLORS_POS[i % len(STACK_COLORS_POS)]
+                            color_neg = STACK_COLORS_NEG[i % len(STACK_COLORS_NEG)]
+                            pts = []
+                            for d in date_list:
+                                v = float(vol_map.get(d, 0) or 0)
+                                pts.append({"time": d, "vol": v})
+                            stack_series_data.append({
+                                "br_name": br_name_s,
+                                "color_pos": color_pos,
+                                "color_neg": color_neg,
+                                "pts": pts
+                            })
+
                     df_resampled['BB_mid'] = df_resampled['Close'].rolling(int(bb_w)).mean()
                     df_resampled['BB_std'] = df_resampled['Close'].rolling(int(bb_w)).std()
                     df_resampled['BB_up'] = df_resampled['BB_mid'] + float(bb_std) * df_resampled['BB_std']
@@ -1508,8 +1601,40 @@ elif cur_page == PAGE_T4:
                         if not pd.isna(row['M2_macd']): item["m2"]=safe_float(row['M2_macd'])
                         if not pd.isna(row['M2_sig']): item["s2"]=safe_float(row['M2_sig'])
                         all_data.append(item)
+
+                    # ── 疊加資料：只保留 plot 範圍內的日期，計算累積 base ──
+                    stack_js_series = []
+                    if is_stack_mode and stack_series_data:
+                        # 對每個日期維護正/負的累積值
+                        pos_accum = {d: 0.0 for d in plot_valid_dates}
+                        neg_accum = {d: 0.0 for d in plot_valid_dates}
+                        for ssd in stack_series_data:
+                            pts_in_range = [p for p in ssd['pts'] if p['time'] in plot_valid_dates]
+                            layer_data = []
+                            for p in pts_in_range:
+                                d = p['time']
+                                v = p['vol']
+                                if v >= 0:
+                                    base = pos_accum[d]
+                                    pos_accum[d] += v
+                                    top = pos_accum[d]
+                                else:
+                                    base = neg_accum[d]
+                                    neg_accum[d] += v
+                                    top = neg_accum[d]
+                                layer_data.append({"time": d, "value": top, "base": base})
+                            layer_data.sort(key=lambda x: x['time'])
+                            stack_js_series.append({
+                                "br_name": ssd['br_name'],
+                                "color_pos": ssd['color_pos'],
+                                "color_neg": ssd['color_neg'],
+                                "data": layer_data
+                            })
+
                     hlines_js_array = json.dumps(st.session_state.custom_hlines)
                     click_lines_js_array = json.dumps(st.session_state.click_lines)
+                    stack_mode_js = 'true' if is_stack_mode and stack_js_series else 'false'
+                    stack_label = " + ".join(stack_br_list) if is_stack_mode else drawn_br_name
 
                     html_code = f"""<!DOCTYPE html><html>
 <head>
@@ -1525,6 +1650,7 @@ elif cur_page == PAGE_T4:
         .lg-label{{color:#a0a3ab;}}
         .lg-vol{{margin-top:6px;padding-top:6px;border-top:1px dashed #555;font-size:15px;display:flex;justify-content:space-between;font-weight:bold;}}
         .lg-macd{{margin-top:6px;font-size:12px;color:#8a8d9d;line-height:1.4;}}
+        .lg-stack{{margin-top:4px;font-size:12px;line-height:1.5;}}
         #mobileDrawBtn{{position:absolute;right:12px;top:12px;z-index:1000;background-color:#ef5350;color:white;border:none;padding:10px 16px;font-size:14px;font-weight:bold;border-radius:8px;cursor:pointer;display:none;box-shadow:0 4px 10px rgba(0,0,0,0.5);}}
         #mobileDrawBtn:active{{background-color:#c62828;}}
     </style>
@@ -1543,6 +1669,8 @@ elif cur_page == PAGE_T4:
         const markersMacd1={json.dumps(final_markers_macd_m1)};
         const markersMacd2={json.dumps(final_markers_macd_m2)};
         const enableClickLine={'true' if enable_click_line else 'false'};
+        const isStackMode={stack_mode_js};
+        const stackSeries={json.dumps(stack_js_series)};
         let clickLineEnabled=enableClickLine;
 
         const chart=LightweightCharts.createChart(document.getElementById('chart'),{{
@@ -1571,9 +1699,34 @@ elif cur_page == PAGE_T4:
         bbUp.setData(rawData.filter(d=>d.bbu!==undefined).map(d=>({{time:d.time,value:d.bbu}})));
         const bbDn=chart.addLineSeries({{color:'rgba(255,255,255,0.4)',lineWidth:1,lineStyle:2,crosshairMarkerVisible:false,lastValueVisible:false,priceLineVisible:false}});
         bbDn.setData(rawData.filter(d=>d.bbd!==undefined).map(d=>({{time:d.time,value:d.bbd}})));
-        const seriesVol=chart.addHistogramSeries({{priceFormat:{{type:'volume'}},priceScaleId:'vol',lastValueVisible:false,priceLineVisible:false}});
-        seriesVol.setData(rawData.map(d=>({{time:d.time,value:d.vol,color:d.vol>0?'rgba(239,83,80,0.8)':d.vol<0?'rgba(38,166,154,0.8)':'rgba(120,120,120,0.5)'}})));
+
+        // ── vol 區：疊加模式用 stackSeries，單一模式用原有邏輯 ──
+        // 建立 dictByTime 供 legend 使用（先建，疊加模式也需要）
+        const dictByTime={{}};rawData.forEach(d=>dictByTime[d.time]=d);
+        // 疊加模式下各分點的 vol map（用於 legend hover）
+        const stackVolByBr={{}};
+        if(isStackMode){{
+            stackSeries.forEach(ss=>{{
+                const vm={{}};
+                ss.data.forEach(p=>{{ vm[p.time]=p.value - p.base; }});
+                stackVolByBr[ss.br_name]=vm;
+            }});
+        }}
+
+        if(isStackMode && stackSeries.length>0){{
+            stackSeries.forEach(ss=>{{
+                const hs=chart.addHistogramSeries({{priceFormat:{{type:'volume'}},priceScaleId:'vol',lastValueVisible:false,priceLineVisible:false}});
+                hs.setData(ss.data.map(p=>{{
+                    const v=p.value - p.base;
+                    return {{time:p.time, value:p.value, base:p.base, color: v>=0 ? ss.color_pos : ss.color_neg}};
+                }}));
+            }});
+        }} else {{
+            const seriesVol=chart.addHistogramSeries({{priceFormat:{{type:'volume'}},priceScaleId:'vol',lastValueVisible:false,priceLineVisible:false}});
+            seriesVol.setData(rawData.map(d=>({{time:d.time,value:d.vol,color:d.vol>0?'rgba(239,83,80,0.8)':d.vol<0?'rgba(38,166,154,0.8)':'rgba(120,120,120,0.5)'}})));
+        }}
         chart.priceScale('vol').applyOptions({{scaleMargins:{{top:0.58,bottom:0.28}},visible:false}});
+
         const seriesH1=chart.addHistogramSeries({{priceFormat:{{type:'volume'}},priceScaleId:'m1',lastValueVisible:false,priceLineVisible:false}});
         seriesH1.setData(rawData.filter(d=>d.h1!==undefined).map(d=>({{time:d.time,value:d.h1,color:d.h1>=0?'rgba(239,83,80,0.5)':'rgba(38,166,154,0.5)'}})));
         const seriesM1=chart.addLineSeries({{color:'#FFD600',lineWidth:1,priceScaleId:'m1',crosshairMarkerVisible:false,lastValueVisible:false,priceLineVisible:false}});
@@ -1599,7 +1752,6 @@ elif cur_page == PAGE_T4:
         const legend=document.getElementById('legend');
         const mobileDrawBtn=document.getElementById('mobileDrawBtn');
         const getDayOfWeek=dStr=>['週日','週一','週二','週三','週四','週五','週六'][new Date(dStr).getDay()];
-        const dictByTime={{}};rawData.forEach(d=>dictByTime[d.time]=d);
         if(clickLineEnabled)mobileDrawBtn.style.display='block';
         window.addEventListener('message',e=>{{if(e.data&&e.data.type==='toggle_click_line'){{clickLineEnabled=e.data.value;mobileDrawBtn.style.display=clickLineEnabled?'block':'none';}}}});
         let lastCrosshairParam=null;
@@ -1609,8 +1761,22 @@ elif cur_page == PAGE_T4:
             let timeStr=param.time;
             if(typeof timeStr==='object'&&timeStr.year)timeStr=timeStr.year+'-'+String(timeStr.month).padStart(2,'0')+'-'+String(timeStr.day).padStart(2,'0');
             const d=dictByTime[timeStr]||dictByTime[param.time];if(!d)return;
-            const vColor=d.vol>=0?'#ef5350':'#26a69a';
-            let html=`<div class="lg-title">{drawn_sid_clean} {stock_name} | ${{timeStr}} ${{getDayOfWeek(timeStr)}}</div><div class="lg-row"><span class="lg-label">開盤</span><span style="color:white;">${{d.open.toFixed(2)}}</span></div><div class="lg-row"><span class="lg-label">最高</span><span style="color:#ef5350;">${{d.high.toFixed(2)}}</span></div><div class="lg-row"><span class="lg-label">最低</span><span style="color:#26a69a;">${{d.low.toFixed(2)}}</span></div><div class="lg-row"><span class="lg-label">收盤</span><span style="color:white;font-weight:bold;">${{d.close.toFixed(2)}}</span></div><div class="lg-vol"><span class="lg-label">買賣 ({drawn_br_name})</span><span style="color:${{vColor}};">${{d.vol}} 張</span></div>`;
+            let html=`<div class="lg-title">{drawn_sid_clean} {stock_name} | ${{timeStr}} ${{getDayOfWeek(timeStr)}}</div><div class="lg-row"><span class="lg-label">開盤</span><span style="color:white;">${{d.open.toFixed(2)}}</span></div><div class="lg-row"><span class="lg-label">最高</span><span style="color:#ef5350;">${{d.high.toFixed(2)}}</span></div><div class="lg-row"><span class="lg-label">最低</span><span style="color:#26a69a;">${{d.low.toFixed(2)}}</span></div><div class="lg-row"><span class="lg-label">收盤</span><span style="color:white;font-weight:bold;">${{d.close.toFixed(2)}}</span></div>`;
+            if(isStackMode && stackSeries.length>0){{
+                let totalVol=0;
+                let stackHtml='<div class="lg-stack">';
+                stackSeries.forEach((ss,i)=>{{
+                    const v=(stackVolByBr[ss.br_name]||{{}})[timeStr]||0;
+                    totalVol+=v;
+                    const vc=v>=0?ss.color_pos:ss.color_neg;
+                    stackHtml+=`<span style="color:${{vc}};">■</span> ${{ss.br_name}}: <b style="color:${{vc}};">${{v}} 張</b><br>`;
+                }});
+                stackHtml+=`<span style="color:#aaa;">合計: <b style="color:${{totalVol>=0?'#ef5350':'#26a69a'}}">${{totalVol}} 張</b></span></div>`;
+                html+=stackHtml;
+            }} else {{
+                const vColor=d.vol>=0?'#ef5350':'#26a69a';
+                html+=`<div class="lg-vol"><span class="lg-label">買賣 ({stack_label})</span><span style="color:${{vColor}};">${{d.vol}} 張</span></div>`;
+            }}
             if(d.h1!==undefined)html+=`<div class="lg-macd"><b>短 MACD:</b> 柱 <span style="color:${{d.h1>=0?'#ef5350':'#26a69a'}}">${{d.h1.toFixed(2)}}</span> | 快 <span style="color:#FFD600">${{d.m1.toFixed(2)}}</span> | 慢 <span style="color:#00E676">${{d.s1.toFixed(2)}}</span></div>`;
             if(d.h2!==undefined)html+=`<div class="lg-macd"><b>長 MACD:</b> 柱 <span style="color:${{d.h2>=0?'#ef5350':'#26a69a'}}">${{d.h2.toFixed(2)}}</span> | 快 <span style="color:#FFD600">${{d.m2.toFixed(2)}}</span> | 慢 <span style="color:#00E676">${{d.s2.toFixed(2)}}</span></div>`;
             legend.innerHTML=html;
