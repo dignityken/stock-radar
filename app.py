@@ -258,7 +258,6 @@ def save_gsheet_watchlist(username, wl_list):
 # ==========================================
 @st.cache_data(ttl=300)
 def load_scan_result(sheet_name="ScanResult"):
-    """從 Google Sheets 的指定分頁讀取掃描結果"""
     if not GSHEETS_AVAILABLE or "gcp_service_account" not in st.secrets:
         return pd.DataFrame()
     try:
@@ -315,14 +314,12 @@ with st.sidebar:
         st.markdown("---")
         st.markdown("#### 📡 VIP 掃描清單")
         with st.expander("展開查看", expanded=False):
-            # ── 日/週切換 ──
             kline_period = st.radio("K線週期", ["日", "週"], horizontal=True, key="vip_kline_period")
             sheet_name = "ScanResult_W" if kline_period == "週" else "ScanResult"
             scan_df = load_scan_result(sheet_name)
             if scan_df.empty:
                 st.caption(f"尚無資料，請先上傳掃描結果至 {sheet_name} 分頁")
             else:
-                # ── 從訊號摘要抓最新訊號日期 ──
                 def get_latest_signal_date(summary):
                     dates = re.findall(r"[0-9]{4}/[0-9]{2}/[0-9]{2}", str(summary))
                     if not dates: return None
@@ -332,7 +329,6 @@ with st.sidebar:
 
                 scan_df["最新訊號日"] = scan_df["訊號摘要"].apply(get_latest_signal_date)
 
-                # ── 強度分數 ──
                 def calc_score(row):
                     score = 0
                     score += min(float(row.get("佔比%", 0)), 100) * 0.4
@@ -367,8 +363,6 @@ with st.sidebar:
 
                 scan_df["符合度"] = scan_df.apply(calc_signal_match, axis=1)
 
-                # ── 篩選條件 ──
-                # 動態計算最大天數（從今天到資料最舊的訊號日期）
                 if not scan_df.empty and "最新訊號日" in scan_df.columns:
                     oldest = scan_df["最新訊號日"].dropna().min()
                     if oldest:
@@ -387,7 +381,6 @@ with st.sidebar:
                 min_pct = st.slider("最低佔比%", 0, 100, 60, step=5, key="scan_min_pct")
                 min_vol = st.number_input("最低張數", min_value=0, value=20, step=10, key="scan_min_vol")
 
-                # ── 先套用日期、方向、強度、佔比、張數篩選（不含分點）──
                 scan_filtered = scan_df.copy()
                 scan_filtered = scan_filtered[scan_filtered["最新訊號日"].apply(lambda d: d is not None and d >= cutoff)]
                 if col_dir != "全部" and "方向" in scan_filtered.columns:
@@ -398,7 +391,6 @@ with st.sidebar:
                 if "張數" in scan_filtered.columns:
                     scan_filtered = scan_filtered[pd.to_numeric(scan_filtered["張數"], errors='coerce').fillna(0) >= min_vol]
 
-                # ── 動態建立分點選單（只顯示有符合條件資料的分點）──
                 if "分點名稱" in scan_filtered.columns:
                     broker_counts = scan_filtered.groupby("分點名稱").size().sort_values(ascending=False)
                     broker_opts = ["全部分點"] + [f"{br}（{cnt}檔）" for br, cnt in broker_counts.items()]
@@ -406,7 +398,6 @@ with st.sidebar:
                     broker_opts = ["全部分點"]
                 sel_broker = st.selectbox("分點過濾", broker_opts, key="scan_broker_sel")
 
-                # ── 再套用分點篩選 ──
                 scan_show = scan_filtered.copy()
                 if sel_broker != "全部分點":
                     real_broker = sel_broker.split("（")[0]
@@ -485,6 +476,10 @@ if 'drawn_sid' not in st.session_state: st.session_state.drawn_sid = "6488"
 if 'drawn_br_name' not in st.session_state: st.session_state.drawn_br_name = "兆豐-忠孝"
 if 'drawn_period' not in st.session_state: st.session_state.drawn_period = "日"
 if 'drawn_days' not in st.session_state: st.session_state.drawn_days = 300
+
+# ── 工作組（session-only，不持久化）──
+if 'working_group' not in st.session_state: st.session_state.working_group = []
+if 'wg_refresh_key' not in st.session_state: st.session_state.wg_refresh_key = 0
 
 if 'watchlist_loaded' not in st.session_state:
     st.session_state.watchlist = load_gsheet_watchlist(current_user)
@@ -771,11 +766,32 @@ if cur_page == PAGE_T1:
                             st.session_state.auto_draw = True
                             st.session_state.current_page = PAGE_T4
                             st.rerun()
+                # ── 加入工作組 ──
+                wg_btn_key = f"wg_add_{key_prefix}_{st.session_state.table_refresh_key}"
+                if st.button("➕ 加入工作組", key=wg_btn_key, help="將勾選的股票加入工作組"):
+                    if editor_key in st.session_state:
+                        edits_wg = st.session_state[editor_key].get('edited_rows', {})
+                        added = 0
+                        for row_idx, changes in edits_wg.items():
+                            if changes.get('📊 K線圖', False) == True:
+                                sid_wg = df_show.iloc[row_idx]['extracted_stock_id']
+                                br_wg = st.session_state.get('t1_last_br', '')
+                                entry = {"股票代號": sid_wg, "追蹤分點": br_wg}
+                                if entry not in st.session_state.working_group:
+                                    st.session_state.working_group.append(entry)
+                                    added += 1
+                        if added:
+                            st.success(f"✅ 已加入 {added} 檔到工作組")
+                        else:
+                            st.warning("請先勾選要加入的股票（勾選 📊 K線圖 欄位）")
 
         col_b = '買進金額' if '金額' in t1_u else '買進張數'
         col_s = '賣出金額' if '金額' in t1_u else '賣出張數'
         exclude_t1 = {'📊 K線圖', 'K線圖', '分點明細', 'extracted_stock_id'}
         sort_opts_t1 = [c for c in st.session_state.t1_buy_df.columns if c not in exclude_t1] if not st.session_state.t1_buy_df.empty else [col_b]
+        # 加入股票名稱排序選項
+        if '股票名稱' not in sort_opts_t1 and not st.session_state.t1_buy_df.empty:
+            sort_opts_t1 = ['股票名稱'] + sort_opts_t1
         saved_t1 = st.session_state.get("t1_sort_val", col_b)
         default_t1 = saved_t1 if saved_t1 in sort_opts_t1 else sort_opts_t1[0]
         t1_sort = st.selectbox("排序依據", sort_opts_t1, index=sort_opts_t1.index(default_t1), key="t1_sort_col")
@@ -1010,12 +1026,33 @@ elif cur_page == PAGE_T3:
                             st.session_state.auto_draw = True
                             st.session_state.current_page = PAGE_T4
                             st.rerun()
+                # ── 加入工作組 ──
+                wg_btn_key = f"wg_add_{key_prefix}_{st.session_state.table_refresh_key}"
+                if st.button("➕ 加入工作組", key=wg_btn_key, help="將勾選的股票加入工作組"):
+                    if editor_key in st.session_state:
+                        edits_wg = st.session_state[editor_key].get('edited_rows', {})
+                        added = 0
+                        for row_idx, changes in edits_wg.items():
+                            if changes.get('📊 K線圖', False) == True:
+                                sid_wg = df_show.iloc[row_idx]['extracted_stock_id']
+                                br_wg = st.session_state.get('t3_last_br', '')
+                                entry = {"股票代號": sid_wg, "追蹤分點": br_wg}
+                                if entry not in st.session_state.working_group:
+                                    st.session_state.working_group.append(entry)
+                                    added += 1
+                        if added:
+                            st.success(f"✅ 已加入 {added} 檔到工作組")
+                        else:
+                            st.warning("請先勾選要加入的股票（勾選 📊 K線圖 欄位）")
 
         sd_s, ed_s = t3_sd.strftime('%Y-%m-%d'), t3_ed.strftime('%Y-%m-%d')
         st.subheader(f"🕵️ 地緣雷達結果：{st.session_state.t3_last_br}")
         st.caption(f"📌 區間：{sd_s} ~ {ed_s} | 單位：{t3_u}")
         exclude_t3 = {'📊 K線圖', 'K線圖', '分點明細', 'extracted_stock_id'}
         sort_opts_t3 = [c for c in st.session_state.t3_buy_df.columns if c not in exclude_t3] if not st.session_state.t3_buy_df.empty else [col_buy]
+        # 加入股票名稱排序選項
+        if '股票名稱' not in sort_opts_t3 and not st.session_state.t3_buy_df.empty:
+            sort_opts_t3 = ['股票名稱'] + sort_opts_t3
         saved_t3 = st.session_state.get("t3_sort_val", col_buy)
         default_t3 = saved_t3 if saved_t3 in sort_opts_t3 else sort_opts_t3[0]
         t3_sort = st.selectbox("排序依據", sort_opts_t3, index=sort_opts_t3.index(default_t3), key="t3_sort_col")
@@ -1030,7 +1067,6 @@ elif cur_page == PAGE_T3:
 # ==========================================
 elif cur_page == PAGE_T4:
 
-    # 處理來自 VIP 掃描清單的跳轉（需在 BROKER_MAP 建立後執行）
     if st.session_state.get("vip_pending_sid"):
         sid = st.session_state.pop("vip_pending_sid")
         br  = st.session_state.pop("vip_pending_br", "")
@@ -1194,52 +1230,131 @@ elif cur_page == PAGE_T4:
             with c_m22: macd2_s = st.number_input("慢", value=52, key="m2s")
             with c_m23: macd2_sig = st.number_input("訊號", value=18, key="m2sig")
 
-    if st.session_state.watchlist:
-        with st.expander(f"⭐ 【{current_user}】的專屬主力清單", expanded=False):
-            if 'wl_refresh_key' not in st.session_state: st.session_state.wl_refresh_key = 0
-            for item in st.session_state.watchlist:
-                if "股票名稱" not in item: item["股票名稱"] = ""
-                if "筆記" not in item: item["筆記"] = ""
-            wl_df = pd.DataFrame(st.session_state.watchlist)
-            wl_df.insert(0, '載入', False)
-            wl_df['刪除'] = False
-            cols = ['載入', '股票代號', '股票名稱', '追蹤分點', '筆記', '刪除']
-            wl_df = wl_df[[c for c in cols if c in wl_df.columns]]
-            wl_config = {
-                "載入": st.column_config.CheckboxColumn("載入繪圖"),
-                "刪除": st.column_config.CheckboxColumn("刪除"),
-                "股票代號": st.column_config.TextColumn(disabled=True),
-                "股票名稱": st.column_config.TextColumn(disabled=True),
-                "追蹤分點": st.column_config.TextColumn(disabled=True),
-                "筆記": st.column_config.TextColumn("📝 筆記 (點擊編輯)")
-            }
-            editor_key = f"wl_editor_{st.session_state.wl_refresh_key}"
-            st.data_editor(wl_df, hide_index=True, column_config=wl_config, width="stretch", key=editor_key)
-            if editor_key in st.session_state:
-                edits = st.session_state[editor_key].get('edited_rows', {})
-                action_taken = False; note_edited = False
-                for row_idx, changes in edits.items():
-                    if '筆記' in changes:
-                        st.session_state.watchlist[row_idx]['筆記'] = changes['筆記']
-                        note_edited = True
-                if note_edited:
-                    success, msg = save_gsheet_watchlist(current_user, st.session_state.watchlist)
-                    if not success: st.error(f"雲端筆記儲存失敗: {msg}")
-                for row_idx, changes in edits.items():
-                    if changes.get('載入', False) == True:
-                        st.session_state.t4_target_sid = wl_df.iloc[row_idx]['股票代號']
-                        st.session_state.t4_target_br = wl_df.iloc[row_idx]['追蹤分點']
-                        st.session_state.auto_draw = True
-                        action_taken = True; break
-                    if changes.get('刪除', False) == True:
-                        del_sid = wl_df.iloc[row_idx]['股票代號']
-                        del_br = wl_df.iloc[row_idx]['追蹤分點']
-                        st.session_state.watchlist = [item for item in st.session_state.watchlist if not (item['股票代號'] == del_sid and item['追蹤分點'] == del_br)]
+    # ==========================================
+    # ⭐ 最愛 / 🗂️ 工作組 切換
+    # ==========================================
+    wg_count = len(st.session_state.working_group)
+    wl_count = len(st.session_state.watchlist)
+
+    tab4_list_mode = st.radio(
+        "清單模式",
+        [f"⭐ 最愛 ({wl_count})", f"🗂️ 工作組 ({wg_count})"],
+        horizontal=True,
+        key="tab4_list_mode",
+        label_visibility="collapsed"
+    )
+
+    if "最愛" in tab4_list_mode:
+        # ── 最愛清單 ──
+        if st.session_state.watchlist:
+            with st.expander(f"⭐ 【{current_user}】的專屬主力清單", expanded=False):
+                if 'wl_refresh_key' not in st.session_state: st.session_state.wl_refresh_key = 0
+                for item in st.session_state.watchlist:
+                    if "股票名稱" not in item: item["股票名稱"] = ""
+                    if "筆記" not in item: item["筆記"] = ""
+                wl_df = pd.DataFrame(st.session_state.watchlist)
+                wl_df.insert(0, '載入', False)
+                wl_df['刪除'] = False
+                cols = ['載入', '股票代號', '股票名稱', '追蹤分點', '筆記', '刪除']
+                wl_df = wl_df[[c for c in cols if c in wl_df.columns]]
+                wl_config = {
+                    "載入": st.column_config.CheckboxColumn("載入繪圖"),
+                    "刪除": st.column_config.CheckboxColumn("刪除"),
+                    "股票代號": st.column_config.TextColumn(disabled=True),
+                    "股票名稱": st.column_config.TextColumn(disabled=True),
+                    "追蹤分點": st.column_config.TextColumn(disabled=True),
+                    "筆記": st.column_config.TextColumn("📝 筆記 (點擊編輯)")
+                }
+                editor_key = f"wl_editor_{st.session_state.wl_refresh_key}"
+                st.data_editor(wl_df, hide_index=True, column_config=wl_config, width="stretch", key=editor_key)
+                if editor_key in st.session_state:
+                    edits = st.session_state[editor_key].get('edited_rows', {})
+                    action_taken = False; note_edited = False
+                    for row_idx, changes in edits.items():
+                        if '筆記' in changes:
+                            st.session_state.watchlist[row_idx]['筆記'] = changes['筆記']
+                            note_edited = True
+                    if note_edited:
                         success, msg = save_gsheet_watchlist(current_user, st.session_state.watchlist)
-                        if not success: st.error(f"雲端刪除同步失敗: {msg}")
-                        action_taken = True; break
-                if action_taken:
-                    st.session_state.wl_refresh_key += 1; st.rerun()
+                        if not success: st.error(f"雲端筆記儲存失敗: {msg}")
+                    for row_idx, changes in edits.items():
+                        if changes.get('載入', False) == True:
+                            st.session_state.t4_target_sid = wl_df.iloc[row_idx]['股票代號']
+                            st.session_state.t4_target_br = wl_df.iloc[row_idx]['追蹤分點']
+                            st.session_state.auto_draw = True
+                            action_taken = True; break
+                        if changes.get('刪除', False) == True:
+                            del_sid = wl_df.iloc[row_idx]['股票代號']
+                            del_br = wl_df.iloc[row_idx]['追蹤分點']
+                            st.session_state.watchlist = [item for item in st.session_state.watchlist if not (item['股票代號'] == del_sid and item['追蹤分點'] == del_br)]
+                            success, msg = save_gsheet_watchlist(current_user, st.session_state.watchlist)
+                            if not success: st.error(f"雲端刪除同步失敗: {msg}")
+                            action_taken = True; break
+                    if action_taken:
+                        st.session_state.wl_refresh_key += 1; st.rerun()
+        else:
+            st.caption("最愛清單為空，可在繪圖頁用 ❤️ 存入按鈕加入。")
+
+    else:
+        # ── 工作組 ──
+        with st.expander(f"🗂️ 工作組（本次連線暫存，共 {wg_count} 檔）", expanded=True):
+            if not st.session_state.working_group:
+                st.caption("工作組為空。請在 TAB1 / TAB3 篩選後勾選股票，點「➕ 加入工作組」。")
+            else:
+                wg_df = pd.DataFrame(st.session_state.working_group)
+                wg_df.insert(0, '載入', False)
+                wg_df['移除'] = False
+                wg_config = {
+                    "載入": st.column_config.CheckboxColumn("載入繪圖"),
+                    "移除": st.column_config.CheckboxColumn("移除"),
+                    "股票代號": st.column_config.TextColumn(disabled=True),
+                    "追蹤分點": st.column_config.TextColumn(disabled=True),
+                }
+                wg_editor_key = f"wg_editor_{st.session_state.wg_refresh_key}"
+                st.data_editor(wg_df, hide_index=True, column_config=wg_config, width="stretch", key=wg_editor_key)
+
+                col_wg1, col_wg2 = st.columns(2)
+                with col_wg1:
+                    if st.button("🗑️ 清空工作組", use_container_width=True):
+                        st.session_state.working_group = []
+                        st.session_state.wg_refresh_key += 1
+                        st.rerun()
+                with col_wg2:
+                    if st.button("❤️ 全部存入最愛", use_container_width=True):
+                        added = 0
+                        for item in st.session_state.working_group:
+                            exists = any(
+                                w.get("股票代號") == item["股票代號"] and w.get("追蹤分點") == item["追蹤分點"]
+                                for w in st.session_state.watchlist
+                            )
+                            if not exists:
+                                st.session_state.watchlist.append({
+                                    "股票代號": item["股票代號"],
+                                    "股票名稱": "",
+                                    "追蹤分點": item["追蹤分點"],
+                                    "筆記": ""
+                                })
+                                added += 1
+                        if added:
+                            save_gsheet_watchlist(current_user, st.session_state.watchlist)
+                            st.success(f"✅ 已存入 {added} 檔到最愛清單")
+                        else:
+                            st.info("全部已在最愛清單中")
+
+                if wg_editor_key in st.session_state:
+                    edits = st.session_state[wg_editor_key].get('edited_rows', {})
+                    action_taken = False
+                    for row_idx, changes in edits.items():
+                        if changes.get('載入', False) == True:
+                            st.session_state.t4_target_sid = wg_df.iloc[row_idx]['股票代號']
+                            st.session_state.t4_target_br = wg_df.iloc[row_idx]['追蹤分點']
+                            st.session_state.auto_draw = True
+                            action_taken = True; break
+                        if changes.get('移除', False) == True:
+                            st.session_state.working_group.pop(row_idx)
+                            action_taken = True; break
+                    if action_taken:
+                        st.session_state.wg_refresh_key += 1; st.rerun()
 
     st.markdown("---")
 
@@ -1303,7 +1418,6 @@ elif cur_page == PAGE_T4:
     draw_btn = draw_btn or draw_btn2
 
     if draw_btn:
-        # 手動點繪圖按鈕：用 radio 當前選的週期
         st.session_state.drawn_period = t4_period
         st.session_state.auto_draw = False
         st.session_state.show_chart = True
@@ -1323,12 +1437,10 @@ elif cur_page == PAGE_T4:
         st.session_state.t4_target_br = t4_br_name
         st.session_state.drawn_sid = t4_sid
         st.session_state.drawn_br_name = t4_br_name
-        # 不動 drawn_period，保留勾選時已設好的值
         st.session_state.drawn_days = t4_days
         st.session_state.drawn_start_year = t4_start_val
 
     elif st.session_state.get('show_chart', False):
-        # 週期或下載範圍改變時自動重繪
         period_changed = t4_period != st.session_state.get('drawn_period', '日')
         start_changed  = t4_start_val != st.session_state.get('drawn_start_year', '2015-01-01')
         if period_changed or start_changed:
