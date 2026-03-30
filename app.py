@@ -468,10 +468,9 @@ with st.sidebar:
                                     st.session_state.current_page = PAGE_T4
                                     st.rerun()
 
-                    # ── 「🗂️ 加入工作組」：純 HTML checkbox + JS 寫入隱藏 text_input ──
-                    # 勾選完全在 HTML 內部，不觸發 rerun
-                    # 點「🗂️ 加入工作組」→ JS 把選取清單寫入 hidden text_input → Streamlit rerun 一次
+                    # ── 「🗂️ 加入工作組」：純 HTML checkbox + JS→隱藏 input 橋接 ──
                     wg_bridge_key = f"vip_wg_bridge_{refresh_key}"
+                    # 清空 bridge 只在非 rerun 狀態下做（避免清空自己觸發的值）
                     if wg_bridge_key not in st.session_state:
                         st.session_state[wg_bridge_key] = ""
 
@@ -487,6 +486,8 @@ with st.sidebar:
 
                     rows_js = json.dumps(rows_json, ensure_ascii=False)
                     html_h = min(56 + len(rows_json) * 24, 480)
+                    # 用唯一 placeholder 定位隱藏 input
+                    bridge_placeholder = f"__wg_bridge_{refresh_key}__"
                     html_wg = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>
 *{{box-sizing:border-box;margin:0;padding:0;}}
@@ -507,6 +508,7 @@ body{{font-family:"Microsoft JhengHei",sans-serif;background:transparent;padding
 <div id="msg"></div>
 <script>
 const rows={rows_js};
+const placeholder="{bridge_placeholder}";
 const g=document.getElementById('g');
 rows.forEach(r=>{{
   const d=document.createElement('div');
@@ -514,33 +516,46 @@ rows.forEach(r=>{{
   d.innerHTML=`<input type="checkbox" id="c${{r.idx}}"><label class="lbl" for="c${{r.idx}}">${{r.sid}} ${{r.sname}}｜${{r.br}} ${{r.match}}</label>`;
   g.appendChild(d);
 }});
+function writeToParent(payload){{
+  try{{
+    const doc=window.parent.document;
+    const inputs=[...doc.querySelectorAll('input[type=text]')];
+    const target=inputs.find(el=>el.placeholder===placeholder);
+    if(!target)return false;
+    const setter=Object.getOwnPropertyDescriptor(window.parent.HTMLInputElement.prototype,'value').set;
+    setter.call(target,payload);
+    target.dispatchEvent(new Event('input',{{bubbles:true}}));
+    return true;
+  }}catch(e){{return false;}}
+}}
 document.getElementById('btn').onclick=()=>{{
   const sel=rows.filter(r=>document.getElementById('c'+r.idx)?.checked);
   if(!sel.length){{document.getElementById('msg').textContent='請先勾選股票';return;}}
   const payload=sel.map(r=>r.sid+'||'+r.br).join(';;');
-  // 找到 parent 頁面中 key 含 wg_bridge 的 input 並寫入值觸發 rerun
-  try{{
-    const inputs=[...window.parent.document.querySelectorAll('input[type=text]')];
-    const target=inputs.find(el=>el.value!==undefined && el.getAttribute('aria-label')==='wg_bridge_input');
-    if(target){{
-      const nativeInput=Object.getOwnPropertyDescriptor(window.parent.HTMLInputElement.prototype,'value');
-      nativeInput.set.call(target,payload);
-      target.dispatchEvent(new Event('input',{{bubbles:true}}));
-      target.dispatchEvent(new Event('change',{{bubbles:true}}));
-    }}
-  }}catch(e){{}}
-  sel.forEach(r=>{{const c=document.getElementById('c'+r.idx);if(c)c.checked=false;}});
-  document.getElementById('msg').textContent='✅ 送出 '+sel.length+' 筆，正在同步...';
+  const ok=writeToParent(payload);
+  document.getElementById('msg').textContent=ok?'✅ 送出 '+sel.length+' 筆':'⚠️ 橋接失敗，請重試';
+  if(ok)sel.forEach(r=>{{const c=document.getElementById('c'+r.idx);if(c)c.checked=false;}});
 }};
 </script></body></html>"""
 
                     components.html(html_wg, height=html_h, scrolling=False)
 
-                    # 橋接 input：JS 找到這個 input 並寫入 payload 觸發 rerun
-                    bridge_val = st.text_input("wg_bridge_input", value="",
-                                               key=wg_bridge_key, label_visibility="collapsed",
-                                               placeholder="")
-                    # 當 bridge 有值時（JS 寫入觸發的 rerun）→ 加入工作組
+                    # 隱藏橋接 input，用 CSS 隱藏整個 wrapper
+                    st.markdown(f"""<style>
+                    div[data-testid="stTextInput"]:has(input[placeholder="{bridge_placeholder}"]) {{
+                        display: none !important;
+                    }}
+                    </style>""", unsafe_allow_html=True)
+
+                    bridge_val = st.text_input(
+                        label="wg_bridge",
+                        value=st.session_state[wg_bridge_key],
+                        key=wg_bridge_key,
+                        placeholder=bridge_placeholder,
+                        label_visibility="collapsed"
+                    )
+
+                    # JS 寫入 bridge → Streamlit rerun → Python 讀值加入工作組
                     raw = st.session_state.get(wg_bridge_key, "").strip()
                     if raw:
                         added = 0
@@ -552,6 +567,7 @@ document.getElementById('btn').onclick=()=>{{
                                 if s and b and entry not in st.session_state.working_group:
                                     st.session_state.working_group.append(entry)
                                     added += 1
+                        # 清空 bridge：用 rerun 後的下一次渲染清空
                         st.session_state[wg_bridge_key] = ""
                         if added:
                             st.success(f"✅ 已加入 {added} 檔到工作組")
