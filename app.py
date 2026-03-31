@@ -470,7 +470,7 @@ with st.sidebar:
 
                     # ── 「🗂️ 加入工作組」：用 multiselect，選好後點按鈕一次 rerun ──
                     wg_options = []
-                    wg_option_map = {}  # label → (sid, br)
+                    wg_option_map = {}  # label → (sid, sname, br)
                     for row_idx, row in scan_show.iterrows():
                         sid = str(row.get("股票代號", "")).strip()
                         sname = str(row.get("股票名稱", "")).strip()
@@ -480,7 +480,7 @@ with st.sidebar:
                         match = str(row.get("符合度", ""))
                         label = f"{sid} {sname}｜{br} {match}"
                         wg_options.append(label)
-                        wg_option_map[label] = (sid, br)
+                        wg_option_map[label] = (sid, sname, br)
 
                     wg_sel = st.multiselect(
                         "加入工作組（可多選）",
@@ -492,10 +492,11 @@ with st.sidebar:
                     if st.button("🗂️ 加入工作組", key=f"wg_add_{refresh_key}", use_container_width=True):
                         added = 0
                         for label in wg_sel:
-                            sid, br = wg_option_map.get(label, ("", ""))
+                            sid, sname, br = wg_option_map.get(label, ("", "", ""))
                             if sid and br:
-                                entry = {"股票代號": sid, "追蹤分點": br}
-                                if entry not in st.session_state.working_group:
+                                entry = {"股票代號": sid, "股票名稱": sname, "追蹤分點": br}
+                                if not any(e.get("股票代號") == sid and e.get("追蹤分點") == br
+                                           for e in st.session_state.working_group):
                                     st.session_state.working_group.append(entry)
                                     added += 1
                         if added:
@@ -1306,14 +1307,18 @@ elif cur_page == PAGE_T4:
                 st.caption("工作組為空。請在側邊欄 VIP 掃描清單勾選 🗂️ 欄位後點「加入工作組」。")
             else:
                 wg_df = pd.DataFrame(st.session_state.working_group)
+                # 確保有 股票名稱 欄位（舊資料可能沒有）
+                if "股票名稱" not in wg_df.columns:
+                    wg_df["股票名稱"] = ""
                 wg_df.insert(0, '載入', False)
-                wg_df.insert(1, '疊加', False)   # ← 新增：疊加繪圖勾選欄
+                wg_df.insert(1, '疊加', False)
                 wg_df['移除'] = False
                 wg_config = {
                     "載入": st.column_config.CheckboxColumn("載入繪圖"),
                     "疊加": st.column_config.CheckboxColumn("📊 疊加"),
                     "移除": st.column_config.CheckboxColumn("移除"),
                     "股票代號": st.column_config.TextColumn(disabled=True),
+                    "股票名稱": st.column_config.TextColumn(disabled=True),
                     "追蹤分點": st.column_config.TextColumn(disabled=True),
                 }
                 wg_editor_key = f"wg_editor_{st.session_state.wg_refresh_key}"
