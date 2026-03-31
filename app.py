@@ -389,7 +389,7 @@ with st.sidebar:
                 else:
                     max_days = 730 if kline_period == "週" else 180
                 default_days = min(120 if kline_period == "週" else 60, max_days)
-                recent_n = st.slider("最近幾天", 7, max_days, default_days, step=7, key=f"scan_recent_days_{kline_period}")
+                recent_n = st.slider("最近幾天", 1, max_days, default_days, step=1, key=f"scan_recent_days_{kline_period}")
                 cutoff = datetime.date.today() - datetime.timedelta(days=recent_n)
 
                 col_dir = st.selectbox("方向", ["全部", "買進", "賣出"], key="scan_dir_filter")
