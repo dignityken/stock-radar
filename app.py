@@ -254,6 +254,56 @@ def save_gsheet_watchlist(username, wl_list):
         return False, f"寫入錯誤: {str(e)}"
 
 # ==========================================
+# 工作組雲端讀寫（獨立 WorkingGroup 分頁）
+# ==========================================
+@st.cache_resource(ttl=3600)
+def init_gsheets_wg():
+    if not GSHEETS_AVAILABLE or "gcp_service_account" not in st.secrets:
+        return None, "無 GSheets"
+    if "gsheets" not in st.secrets or "spreadsheet_url" not in st.secrets["gsheets"]:
+        return None, "無試算表網址"
+    try:
+        scopes = ['https://www.googleapis.com/auth/spreadsheets']
+        creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
+        client = gspread.authorize(creds)
+        raw_url = st.secrets["gsheets"]["spreadsheet_url"]
+        doc = client.open_by_url(raw_url.split("?")[0])
+        try:
+            ws = doc.worksheet("WorkingGroup")
+        except gspread.exceptions.WorksheetNotFound:
+            ws = doc.add_worksheet(title="WorkingGroup", rows="1000", cols="2")
+            ws.update_acell('A1', 'Username')
+            ws.update_acell('B1', 'WorkingGroupJSON')
+        return ws, "OK"
+    except Exception as e:
+        return None, f"GSheets WG 連線失敗: {str(e)}"
+
+def load_gsheet_working_group(username):
+    ws, msg = init_gsheets_wg()
+    if not ws: return []
+    try:
+        cell = ws.find(username, in_column=1)
+        if cell:
+            data = ws.cell(cell.row, 2).value
+            if data: return json.loads(data)
+    except: pass
+    return []
+
+def save_gsheet_working_group(username, wg_list):
+    ws, msg = init_gsheets_wg()
+    if not ws: return False, msg
+    try:
+        data_str = json.dumps(wg_list, ensure_ascii=False)
+        cell = ws.find(username, in_column=1)
+        if cell:
+            ws.update_cell(cell.row, 2, data_str)
+        else:
+            ws.append_row([username, data_str])
+        return True, "OK"
+    except Exception as e:
+        return False, str(e)
+
+# ==========================================
 # 📡 掃描結果清單（VIP 專屬）
 # ==========================================
 @st.cache_data(ttl=300)
@@ -500,6 +550,7 @@ with st.sidebar:
                                     st.session_state.working_group.append(entry)
                                     added += 1
                         if added:
+                            save_gsheet_working_group(current_user, st.session_state.working_group)
                             st.success(f"✅ 已加入 {added} 檔到工作組")
                         elif wg_sel:
                             st.info("全部已在工作組中")
@@ -539,8 +590,9 @@ if 'drawn_br_name' not in st.session_state: st.session_state.drawn_br_name = "�
 if 'drawn_period' not in st.session_state: st.session_state.drawn_period = "日"
 if 'drawn_days' not in st.session_state: st.session_state.drawn_days = 300
 
-# ── 工作組（session-only，重新整理即清空）──
-if 'working_group' not in st.session_state: st.session_state.working_group = []
+# ── 工作組（雲端持久化，跟最愛清單獨立存放）──
+if 'working_group' not in st.session_state:
+    st.session_state.working_group = load_gsheet_working_group(current_user)
 if 'wg_refresh_key' not in st.session_state: st.session_state.wg_refresh_key = 0
 # ── 疊加繪圖用的分點清單（從工作組多選觸發）──
 if 'stack_br_list' not in st.session_state: st.session_state.stack_br_list = []
@@ -1302,9 +1354,9 @@ elif cur_page == PAGE_T4:
 
     else:
         # ── 工作組（session-only）──
-        with st.expander(f"🗂️ 工作組（本次連線暫存，共 {wg_count} 檔）", expanded=True):
+        with st.expander(f"🗂️ 工作組（雲端持久，共 {wg_count} 檔）", expanded=True):
             if not st.session_state.working_group:
-                st.caption("工作組為空。請在側邊欄 VIP 掃描清單勾選 🗂️ 欄位後點「加入工作組」。")
+                st.caption("工作組為空。請在側邊欄 VIP 掃描清單選取後點「加入工作組」。")
             else:
                 wg_df = pd.DataFrame(st.session_state.working_group)
                 # 確保有 股票名稱 欄位（舊資料可能沒有）
@@ -1328,6 +1380,7 @@ elif cur_page == PAGE_T4:
                 with col_wg1:
                     if st.button("🗑️ 清空工作組", use_container_width=True):
                         st.session_state.working_group = []
+                        save_gsheet_working_group(current_user, [])
                         st.session_state.wg_refresh_key += 1
                         st.rerun()
                 with col_wg2:
@@ -1387,6 +1440,7 @@ elif cur_page == PAGE_T4:
                             action_taken = True; break
                         if changes.get('移除', False) == True:
                             st.session_state.working_group.pop(row_idx)
+                            save_gsheet_working_group(current_user, st.session_state.working_group)
                             action_taken = True; break
                     if action_taken:
                         st.session_state.wg_refresh_key += 1; st.rerun()
