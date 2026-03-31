@@ -428,7 +428,7 @@ with st.sidebar:
                 )
                 scan_df = enrich_scan_df(df_for_cache.to_json(orient='split'), today_str)
 
-                # ── 篩選條件 ──
+                # ── 篩選條件：包在 form 裡，調完按「套用」才 rerun ──
                 if not scan_df.empty and "最新訊號日" in scan_df.columns:
                     oldest = scan_df["最新訊號日"].dropna().min()
                     if oldest:
@@ -439,13 +439,47 @@ with st.sidebar:
                 else:
                     max_days = 730 if kline_period == "週" else 180
                 default_days = min(120 if kline_period == "週" else 60, max_days)
-                recent_n = st.slider("最近幾天", 7, max_days, default_days, step=7, key=f"scan_recent_days_{kline_period}")
-                cutoff = datetime.date.today() - datetime.timedelta(days=recent_n)
 
-                col_dir = st.selectbox("方向", ["全部", "買進", "賣出"], key="scan_dir_filter")
-                min_score = st.slider("最低強度", 0, 120, 60, step=5, key="scan_min_score")
-                min_pct = st.slider("最低佔比%", 0, 100, 60, step=5, key="scan_min_pct")
-                min_vol = st.number_input("最低張數", min_value=0, value=20, step=10, key="scan_min_vol")
+                # 用 session_state 保存上次套用的篩選值，form 送出前不影響結果
+                fk = f"vip_filter_{kline_period}"
+                if fk not in st.session_state:
+                    st.session_state[fk] = {
+                        "recent_n": default_days,
+                        "col_dir": "全部",
+                        "min_score": 60,
+                        "min_pct": 60,
+                        "min_vol": 20,
+                    }
+
+                with st.form(key=f"vip_filter_form_{kline_period}", border=False):
+                    recent_n_input = st.slider("最近幾天", 7, max_days,
+                                               st.session_state[fk]["recent_n"], step=7)
+                    col_dir_input = st.selectbox("方向", ["全部", "買進", "賣出"],
+                                                 index=["全部","買進","賣出"].index(st.session_state[fk]["col_dir"]))
+                    min_score_input = st.slider("最低強度", 0, 120,
+                                                st.session_state[fk]["min_score"], step=5)
+                    min_pct_input = st.slider("最低佔比%", 0, 100,
+                                              st.session_state[fk]["min_pct"], step=5)
+                    min_vol_input = st.number_input("最低張數", min_value=0,
+                                                    value=st.session_state[fk]["min_vol"], step=10)
+                    submitted = st.form_submit_button("🔍 套用篩選", use_container_width=True)
+
+                if submitted:
+                    st.session_state[fk] = {
+                        "recent_n": recent_n_input,
+                        "col_dir": col_dir_input,
+                        "min_score": min_score_input,
+                        "min_pct": min_pct_input,
+                        "min_vol": int(min_vol_input),
+                    }
+
+                # 讀取已套用的值
+                recent_n  = st.session_state[fk]["recent_n"]
+                col_dir   = st.session_state[fk]["col_dir"]
+                min_score = st.session_state[fk]["min_score"]
+                min_pct   = st.session_state[fk]["min_pct"]
+                min_vol   = st.session_state[fk]["min_vol"]
+                cutoff = datetime.date.today() - datetime.timedelta(days=recent_n)
 
                 # ── 先套用日期、方向、強度、佔比、張數篩選（不含分點）──
                 scan_filtered = scan_df.copy()
@@ -1359,15 +1393,14 @@ elif cur_page == PAGE_T4:
                 st.caption("工作組為空。請在側邊欄 VIP 掃描清單選取後點「加入工作組」。")
             else:
                 wg_df = pd.DataFrame(st.session_state.working_group)
-                # 確保有 股票名稱 欄位（舊資料可能沒有）
                 if "股票名稱" not in wg_df.columns:
                     wg_df["股票名稱"] = ""
                 wg_df.insert(0, '載入', False)
-                wg_df.insert(1, '疊加', False)
+                wg_df.insert(1, '存愛', False)
                 wg_df['移除'] = False
                 wg_config = {
                     "載入": st.column_config.CheckboxColumn("載入繪圖"),
-                    "疊加": st.column_config.CheckboxColumn("📊 疊加"),
+                    "存愛": st.column_config.CheckboxColumn("⭐ 存最愛"),
                     "移除": st.column_config.CheckboxColumn("移除"),
                     "股票代號": st.column_config.TextColumn(disabled=True),
                     "股票名稱": st.column_config.TextColumn(disabled=True),
@@ -1376,7 +1409,7 @@ elif cur_page == PAGE_T4:
                 wg_editor_key = f"wg_editor_{st.session_state.wg_refresh_key}"
                 st.data_editor(wg_df, hide_index=True, column_config=wg_config, width="stretch", key=wg_editor_key)
 
-                col_wg1, col_wg2, col_wg3 = st.columns(3)
+                col_wg1, col_wg2 = st.columns(2)
                 with col_wg1:
                     if st.button("🗑️ 清空工作組", use_container_width=True):
                         st.session_state.working_group = []
@@ -1384,56 +1417,43 @@ elif cur_page == PAGE_T4:
                         st.session_state.wg_refresh_key += 1
                         st.rerun()
                 with col_wg2:
-                    if st.button("❤️ 全部存入最愛", use_container_width=True):
-                        added = 0
-                        for item in st.session_state.working_group:
-                            exists = any(
-                                w.get("股票代號") == item["股票代號"] and w.get("追蹤分點") == item["追蹤分點"]
-                                for w in st.session_state.watchlist
-                            )
-                            if not exists:
-                                st.session_state.watchlist.append({
-                                    "股票代號": item["股票代號"],
-                                    "股票名稱": "",
-                                    "追蹤分點": item["追蹤分點"],
-                                    "筆記": ""
-                                })
-                                added += 1
-                        if added:
-                            save_gsheet_watchlist(current_user, st.session_state.watchlist)
-                            st.success(f"✅ 已存入 {added} 檔到最愛清單")
-                        else:
-                            st.info("全部已在最愛清單中")
-                with col_wg3:
-                    # ── 疊加繪圖按鈕 ──
-                    if st.button("📊 疊加繪圖", use_container_width=True, type="primary"):
+                    if st.button("❤️ 勾選存入最愛", use_container_width=True):
                         if wg_editor_key in st.session_state:
-                            edits_stk = st.session_state[wg_editor_key].get('edited_rows', {})
-                            selected = [wg_df.iloc[ri] for ri, ch in edits_stk.items() if ch.get('疊加', False)]
-                            if not selected:
-                                st.warning("請先勾選 📊 疊加 欄位的分點（至少1筆）")
+                            edits_fav = st.session_state[wg_editor_key].get('edited_rows', {})
+                            selected_fav = [wg_df.iloc[ri] for ri, ch in edits_fav.items() if ch.get('存愛', False)]
+                            if not selected_fav:
+                                st.warning("請先勾選 ⭐ 存最愛 欄位的項目")
                             else:
-                                sids = list({r['股票代號'] for r in selected})
-                                if len(sids) > 1:
-                                    st.warning(f"疊加只支援同一檔股票，目前勾選了 {sids}，請只勾選同一股票代號的分點。")
-                                else:
-                                    br_list = [r['追蹤分點'] for r in selected]
-                                    st.session_state.stack_sid = sids[0]
-                                    st.session_state.stack_br_list = br_list
-                                    st.session_state.t4_target_sid = sids[0]
-                                    st.session_state.t4_target_br = br_list[0]
-                                    st.session_state.auto_draw = True
+                                added = 0
+                                for row in selected_fav:
+                                    sid = str(row.get("股票代號", "")).strip()
+                                    sname = str(row.get("股票名稱", "")).strip()
+                                    br = str(row.get("追蹤分點", "")).strip()
+                                    exists = any(
+                                        w.get("股票代號") == sid and w.get("追蹤分點") == br
+                                        for w in st.session_state.watchlist
+                                    )
+                                    if not exists:
+                                        st.session_state.watchlist.append({
+                                            "股票代號": sid,
+                                            "股票名稱": sname,
+                                            "追蹤分點": br,
+                                            "筆記": ""
+                                        })
+                                        added += 1
+                                if added:
+                                    save_gsheet_watchlist(current_user, st.session_state.watchlist)
+                                    st.success(f"✅ 已存入 {added} 檔到最愛清單")
                                     st.session_state.wg_refresh_key += 1
                                     st.rerun()
-
-                # ── 載入單筆 / 移除（只在有動作時 rerun）──
+                                else:
+                                    st.info("全部已在最愛清單中")
+                # ── 載入單筆 / 移除 ──
                 if wg_editor_key in st.session_state:
                     edits = st.session_state[wg_editor_key].get('edited_rows', {})
                     action_taken = False
                     for row_idx, changes in edits.items():
                         if changes.get('載入', False) == True:
-                            st.session_state.stack_br_list = []   # 清掉疊加狀態
-                            st.session_state.stack_sid = ""
                             st.session_state.t4_target_sid = wg_df.iloc[row_idx]['股票代號']
                             st.session_state.t4_target_br = wg_df.iloc[row_idx]['追蹤分點']
                             st.session_state.auto_draw = True
