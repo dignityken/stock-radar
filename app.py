@@ -385,7 +385,7 @@ with st.sidebar:
                 # ── 強度分數 & 符合度（用 cache 避免每次 rerun 重算）──
                 @st.cache_data(ttl=300)
                 def enrich_scan_df(df_json: str, today_str: str):
-                    df = pd.read_json(df_json, orient='split')
+                    df = pd.read_json(StringIO(df_json), orient='split')
                     # 還原最新訊號日為 date 物件
                     df["最新訊號日"] = df["最新訊號日"].apply(
                         lambda x: datetime.datetime.strptime(x, "%Y-%m-%d").date() if isinstance(x, str) and x else None
